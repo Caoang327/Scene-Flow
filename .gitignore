@@ -4,3 +4,5 @@ __pycache__
 Thumbs.db
 *.npy
 *.txt
+.idea
+*.pyc

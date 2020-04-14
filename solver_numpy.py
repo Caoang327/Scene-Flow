@@ -151,10 +151,61 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p):
     p_homo = exp_map(motion).dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
     p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
     residual = p3d_t2 - q_3d
-    # print(torch.sum(residual))
+    # print(np.sum(np.abs(residual)))
+    # print(residual)
     E = ((np.sum(residual ** 2, axis=0) + epsilon ** 2) ** alpha) * alpha_p[p[:, 1], p[:, 0]]
 
     return E
+
+
+def ransac(p, disparity1, disparity2, flow, alpha_p):
+    """
+    Implement RANSAC algorithm to find the optimal motion
+
+    Inputs:
+    - p: point set of one instance in 1st img, array of shape (N, 2)
+    - disparity1: disparity map of time t, array of shape (m, n)
+    - disparity2: disparity map of time t+1, array of shape (m, n)
+    - flow: flow matrix of 1st img, array of shape (2, m, n)
+    - alpha_p: indicators representing if it is a outlier, array of shape (m, n)
+
+    Outputs:
+    - best_motion: the optimal motion, array of shape (6,)
+    """
+    num_iters = 10
+    epsilon = 0.1
+    N = p.shape[0]
+    num_inliers = 0
+    idxset_best = []
+    motion_0 = np.ones(6)
+    for i in range(num_iters):
+        idx = np.random.choice(N, N//15, replace=False)
+        res = least_squares(cost_function, motion_0, args=(p[idx, :], disparity1, disparity2, flow, alpha_p))
+        motion = res.x
+
+        # calculate residual
+        data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
+        pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
+        p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
+        flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
+        q = p + flow_q.T
+        disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p)  # of shape (N, )
+        q_3d = inverse_project(q, pi_k, disparity_q, T, f)
+        p_homo = exp_map(motion).dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+        p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
+        residual = np.sqrt(np.sum((p3d_t2 - q_3d)**2, axis=0))
+        if num_inliers < np.sum(residual < epsilon):
+            idxset_best = np.argwhere(residual < epsilon)[:, 0]
+            num_inliers = np.sum(residual < epsilon)
+    best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p))
+    best_motion = best_res.x
+    # print(best_res.cost)
+    # print(num_inliers, N)
+    # print(residual)
+    # print(cost_function(best_motion, p, disparity1, disparity2, flow, alpha_p))
+
+    return best_motion
+
 
 
 masks = np.load("pmask_left_t0.npy")
@@ -166,15 +217,11 @@ result = util.flow_to_color(flow.transpose(1, 2, 0))
 plt.imshow(result)
 plt.show()
 
-flow_result = copy.deepcopy(flow)
-for p in get_pointset(masks)[1:2]:
-    alpha_p = np.ones_like(disparity1)
-    motion_0 = np.ones(6)
-    # motion_0 = np.array([0.1158, 0.2223, -0.4711, 3.7559, 3.7559, 3.7559])
-    # motion_0 = np.array([ 0.44899609, 0.06546864, -0.49421121, 3.53099094, 3.28189738, 4.32275508])
-    res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
-    motion = res.x
-    print(res.cost)
+# flow_result = copy.deepcopy(flow)
+flow_result = np.zeros_like(flow)
+alpha_p = np.ones_like(disparity1)
+for p in get_pointset(masks):
+    motion = ransac(p, disparity1, disparity2, flow, alpha_p)
 
     # calculate the instance-wise rigid flow estimation
     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
@@ -195,4 +242,4 @@ result = util.flow_to_color(flow_result.transpose(1, 2, 0))
 plt.imshow(result)
 plt.show()
 
-print(motion)
+# print(motion)

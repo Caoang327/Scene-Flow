@@ -175,8 +175,8 @@ plt.imshow(result)
 plt.show()
 
 flow_result = copy.deepcopy(flow)
+alpha_p = torch.ones_like(disparity1)
 for p in get_pointset(masks)[1:2]:
-    alpha_p = torch.ones_like(disparity1)
     motion = (2 * torch.ones(6, 1).to(device)).requires_grad_()
     learning_rate = 1e-6
     # weight_decay = 1e-5
