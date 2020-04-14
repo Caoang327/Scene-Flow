@@ -220,8 +220,12 @@ plt.show()
 # flow_result = copy.deepcopy(flow)
 flow_result = np.zeros_like(flow)
 alpha_p = np.ones_like(disparity1)
+motion_0 = np.ones(6)
 for p in get_pointset(masks):
-    motion = ransac(p, disparity1, disparity2, flow, alpha_p)
+    # motion = ransac(p, disparity1, disparity2, flow, alpha_p)
+    res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
+    motion = res.x
+
 
     # calculate the instance-wise rigid flow estimation
     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
@@ -233,9 +237,9 @@ for p in get_pointset(masks):
     p_homo = pi_k.dot(p_3d_t2)
     p_t2 = p_homo[:2, :] / p_homo[2:3, :]
     flow_rigid = p_t2 - p.T
-    print(np.sum(np.abs(flow_result[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
-    print(flow_result[:, p[:, 1], p[:, 0]])
-    print(flow_rigid)
+    print(np.sum(np.abs(flow[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
+    # print(flow_result[:, p[:, 1], p[:, 0]])
+    # print(flow_rigid)
     flow_result[:, p[:, 1], p[:, 0]] = flow_rigid
 
 result = util.flow_to_color(flow_result.transpose(1, 2, 0))

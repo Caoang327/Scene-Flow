@@ -174,14 +174,15 @@ result = util.flow_to_color(flow.numpy().transpose(1, 2, 0))
 plt.imshow(result)
 plt.show()
 
-flow_result = copy.deepcopy(flow)
+# flow_result = copy.deepcopy(flow)
+flow_result = torch.zeros_like(flow)
 alpha_p = torch.ones_like(disparity1)
-for p in get_pointset(masks)[1:2]:
-    motion = (2 * torch.ones(6, 1).to(device)).requires_grad_()
+for p in get_pointset(masks)[0:1]:
+    motion = (torch.ones(6, 1).to(device)).requires_grad_()
     learning_rate = 1e-6
     # weight_decay = 1e-5
     optimizer = torch.optim.SGD([motion], lr=learning_rate)
-    num_iters = 2000
+    num_iters = 1000
 
     # res = least_squares(fx, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
     # motion = res.x
@@ -207,12 +208,12 @@ for p in get_pointset(masks)[1:2]:
     p_homo = pi_k.matmul(p_3d_t2)
     p_t2 = p_homo[:2, :] / p_homo[2:3, :]
     flow_rigid = p_t2 - p.to(p_t2).t()
-    print(torch.sum(torch.abs(flow_result[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
+    print(torch.sum(torch.abs(flow[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
     flow_result[:, p[:, 1], p[:, 0]] = flow_rigid
 
 result = util.flow_to_color(flow_result.detach().numpy().transpose(1, 2, 0))
 plt.imshow(result)
 plt.show()
 
-print(torch.sum(alpha_p))
-print(motion)
+# print(torch.sum(alpha_p))
+# print(motion)
