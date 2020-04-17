@@ -151,7 +151,7 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p):
     p_homo = exp_map(motion).dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
     p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
     residual = p3d_t2 - q_3d
-    # print(np.sum(np.abs(residual)))
+    # print(np.sum(np.abs(residual), axis=0))
     # print(residual)
     E = ((np.sum(residual ** 2, axis=0) + epsilon ** 2) ** alpha) * alpha_p[p[:, 1], p[:, 0]]
 
@@ -221,10 +221,27 @@ plt.show()
 flow_result = np.zeros_like(flow)
 alpha_p = np.ones_like(disparity1)
 motion_0 = np.ones(6)
-for p in get_pointset(masks):
+for p in get_pointset(masks)[1:2]:
     # motion = ransac(p, disparity1, disparity2, flow, alpha_p)
     res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
     motion = res.x
+
+    # calculate 3d error
+    N = p.shape[0]
+    data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
+    pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
+    p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
+    flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
+    q = p + flow_q.T
+    disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p)  # of shape (N, )
+    q_3d = inverse_project(q, pi_k, disparity_q, T, f)
+    p_homo = exp_map(motion).dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+    p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
+    residual = p3d_t2 - q_3d
+    print(np.sum(np.abs(residual), axis=0))
+    print(np.sum(np.abs(residual)))
+    print(residual)
+    print(residual.shape)
 
 
     # calculate the instance-wise rigid flow estimation
