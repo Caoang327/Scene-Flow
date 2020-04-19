@@ -7,7 +7,7 @@ import numpy as np
 # from PIL import Image
 
 
-class KITTI2015(Dataset):
+class KITTI2015_stereo(Dataset):
 
     def __init__(self, directory, mode, validate_size=40, occ=True, transform=None):
         super().__init__()
@@ -68,6 +68,76 @@ class KITTI2015(Dataset):
 
         if self.transform:
             data = self.transform(data)
+
+        return data
+
+
+class KITTI2015_flow(Dataset):
+
+    def __init__(self, directory, mode, validate_size=40, occ=True, transform=None):
+        super().__init__()
+
+        self.mode = mode
+        self.transform = transform
+
+        if mode == 'train' or mode == 'validate':
+            self.dir = join(directory, 'training')
+        elif mode == 'test':
+            self.dir = join(directory, 'testing')
+
+        left_dir = join(self.dir, 'image_2')
+        left_imgs_01 = list()
+        left_imgs_11 = list()
+
+        if mode == 'train':
+            imgs_range = range(200 - validate_size)
+        elif mode == 'validate':
+            imgs_range = range(200 - validate_size, 200)
+        elif mode == 'test':
+            imgs_range = range(200)
+
+        fmt_10 = '{:06}_10.png'
+        fmt_11 = '{:06}_11.png'
+
+        for i in imgs_range:
+            left_imgs_01.append(join(left_dir, fmt_10.format(i)))
+            left_imgs_11.append(join(left_dir, fmt_11.format(i)))
+            # right_imgs.append(join(right_dir, fmt.format(i)))
+
+        self.left_imgs_first = left_imgs_01
+        self.left_imgs_second = left_imgs_11
+
+        # self.disp_imgs = None
+        if mode == 'train' or mode == 'validate':
+            flow_imgs = list()
+            if occ:
+                flow_dir = join(self.dir, 'flow_occ')
+            else:
+                flow_dir = join(self.dir, 'flow_noc')
+            flow_fmt = '{:06}_10.png'
+            for i in imgs_range:
+                flow_imgs.append(join(flow_dir, flow_fmt.format(i)))
+
+            self.flow_imgs = flow_imgs
+
+    def __len__(self):
+        return len(self.left_imgs_first)
+
+    def __getitem__(self, idx):
+        data = {}
+
+        # bgr mode, note: 'left' --> first, 'right' --> second, names to reuse transforms
+        data['left'] = cv2.imread(self.left_imgs_first[idx])[:, :, ::-1].astype(np.float)  # RGB to BGR
+        data['right'] = cv2.imread(self.left_imgs_second[idx])[:, :, ::-1].astype(np.float)  # RGB to BGR
+
+        if self.transform:
+            data = self.transform(data)
+
+        if self.mode != 'test':
+            flow = cv2.imread(self.flow_imgs[idx], cv2.IMREAD_UNCHANGED)[:, :, ::-1].astype(np.float)
+            # 20: the network was pre-trained with this factor (magic number:)
+            data['flow'] = (flow[:, :, :2] - 2**15) / 64.0 / 20
+            data['mask'] = flow[:, :, 2]
 
         return data
 
@@ -142,12 +212,23 @@ class Pad():
         left = F.pad(left, pad=(0, pad_w, 0, pad_h))
         right = sample['right'].unsqueeze(0)  # [1, 3, H, W]
         right = F.pad(right, pad=(0, pad_w, 0, pad_h))
-        disp = sample['disp'].unsqueeze(0).unsqueeze(1)  # [1, 1, H, W]
-        disp = F.pad(disp, pad=(0, pad_w, 0, pad_h))
+
+        if 'disp' in sample:
+            disp = sample['disp'].unsqueeze(0)  # [1, 2, H, W]
+            disp = F.pad(disp, pad=(0, pad_w, 0, pad_h))
+        if 'flow' in sample:
+            flow = sample['flow'].unsqueeze(0).unsqueeze(1)
+            flow = F.pad(flow, pad=(0, pad_w, 0, pad_h))
+            mask = sample['mask'].unsqueeze(0).unsqueeze(1)  # [1, 1, H, W]
+            mask = F.pad(mask, pad=(0, pad_w, 0, pad_h))
 
         sample['left'] = left.squeeze()
         sample['right'] = right.squeeze()
-        sample['disp'] = disp.squeeze()
+        if 'disp' in sample:
+            sample['disp'] = disp.squeeze()
+        if 'flow' in sample:
+            sample['mask'] = mask.squeeze()
+            sample['flow'] = flow.squeeze()
 
         return sample
 
@@ -161,15 +242,15 @@ if __name__ == '__main__':
     std = [0.225, 0.224, 0.229]
 
     train_transform = T.Compose([RandomCrop([256, 512]), ToTensor()])
-    train_dataset = KITTI2015('D:/dataset/data_scene_flow', mode='train', transform=train_transform)
+    train_dataset = KITTI2015_stereo('D:/dataset/data_scene_flow', mode='train', transform=train_transform)
     train_loader = DataLoader(train_dataset)
     print(len(train_loader))
 
     # test_transform = T.Compose([ToTensor()])
-    # test_dataset = KITTI2015('D:/dataset/data_scene_flow', mode='test', transform=test_transform)
+    # test_dataset = KITTI2015_stereo('D:/dataset/data_scene_flow', mode='test', transform=test_transform)
 
     # validate_transform = T.Compose([ToTensor()])
-    # validate_dataset = KITTI2015('D:/dataset/data_scene_flow', mode='validate', transform=validate_transform)
+    # validate_dataset = KITTI2015_stereo('D:/dataset/data_scene_flow', mode='validate', transform=validate_transform)
 
     # datasets = [train_dataset, test_dataset, validate_dataset]
 

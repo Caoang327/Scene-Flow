@@ -11,7 +11,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader
 # from models.PSMnet import PSMNet
 # from models.smoothloss import SmoothL1Loss
-from utils.KITTI2015_loader import KITTI2015, RandomCrop, ToTensor, Normalize, Pad
+from utils.KITTI2015_loader import KITTI2015_stereo, RandomCrop, ToTensor, Normalize, Pad
 import math
 
 import tensorboardX as tX
@@ -515,9 +515,9 @@ def save_image(left_image, disp, epoch):
 
 
 def train(model, train_loader, optimizer, criterion, step):
-    '''
+    """
     train one epoch
-    '''
+    """
     for batch in train_loader:
         step += 1
         optimizer.zero_grad()
@@ -549,14 +549,6 @@ def train(model, train_loader, optimizer, criterion, step):
                                                                                                         loss2.item(),
                                                                                                         loss3.item()))
 
-        # investigate memory leak
-        # for obj in gc.get_objects():
-        #     try:
-        #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-        #             print(type(obj), obj.size())
-        #     except:
-        #         pass
-        # input("pause")
     return step
 
 
