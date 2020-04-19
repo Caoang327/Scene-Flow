@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
+import torchvision.transforms as T
 from tensorboardX import SummaryWriter
 
 import getopt
@@ -13,9 +14,44 @@ import sys
 import correlation
 import matplotlib.pyplot as plt
 from utils import flow_utils, tools
+from utils.KITTI2015_loader import KITTI2015_flow, Normalize, ToTensor, Pad, mean, std
 
 from tqdm import tqdm
 from glob import glob
+
+backwarp_tenGrid = {}
+backwarp_tenPartial = {}
+
+
+def backwarp(tenInput, tenFlow):
+    if str(tenFlow.size()) not in backwarp_tenGrid:
+        tenHorizontal = torch.linspace(-1.0, 1.0, tenFlow.shape[3]).view(1, 1, 1, tenFlow.shape[3]).expand(
+            tenFlow.shape[0], -1, tenFlow.shape[2], -1)
+        tenVertical = torch.linspace(-1.0, 1.0, tenFlow.shape[2]).view(1, 1, tenFlow.shape[2], 1).expand(
+            tenFlow.shape[0], -1, -1, tenFlow.shape[3])
+
+        backwarp_tenGrid[str(tenFlow.size())] = torch.cat([tenHorizontal, tenVertical], 1).cuda()
+    # end
+
+    if str(tenFlow.size()) not in backwarp_tenPartial:
+        backwarp_tenPartial[str(tenFlow.size())] = tenFlow.new_ones(
+            [tenFlow.shape[0], 1, tenFlow.shape[2], tenFlow.shape[3]])
+    # end
+
+    tenFlow = torch.cat([tenFlow[:, 0:1, :, :] / ((tenInput.shape[3] - 1.0) / 2.0),
+                         tenFlow[:, 1:2, :, :] / ((tenInput.shape[2] - 1.0) / 2.0)], 1)
+    tenInput = torch.cat([tenInput, backwarp_tenPartial[str(tenFlow.size())]], 1)
+
+    tenOutput = torch.nn.functional.grid_sample(input=tenInput,
+                                                grid=(backwarp_tenGrid[str(tenFlow.size())] + tenFlow).permute(0, 2, 3,
+                                                                                                               1),
+                                                mode='bilinear', padding_mode='zeros', align_corners=True)
+
+    tenMask = tenOutput[:, -1:, :, :];
+    tenMask[tenMask > 0.999] = 1.0;
+    tenMask[tenMask < 1.0] = 0.0
+
+    return tenOutput[:, :-1, :, :] * tenMask
 
 
 class PWCNetwork(torch.nn.Module):
@@ -287,7 +323,6 @@ def backwarp(tenInput, tenFlow):
 
 
 def estimate(netNetwork, tenFirst, tenSecond):
-
     if netNetwork is None:
         netNetwork = PWCNetwork().cuda().eval()
 
@@ -320,6 +355,90 @@ def estimate(netNetwork, tenFirst, tenSecond):
     tenFlow[:, 1, :, :] *= float(intHeight) / float(intPreprocessedHeight)
 
     return tenFlow[0, :, :, :].cpu()
+
+def clear_backwarp():
+    global backwarp_tenGrid
+    global backwarp_tenPartial
+    backwarp_tenGrid = {}
+    backwarp_tenPartial = {}
+
+
+def train(model: PWCNetwork, train_loader, optimizer, criterion, step, device="cuda"):
+    """ Training Process """
+    for batch in train_loader:
+        clear_backwarp()
+        step += 1
+        optimizer.zero_grad()
+
+        first_img = batch['left'].to(device)
+        second_img = batch['right'].to(device)
+        target_flow = batch['flow'].to(device)
+        mask = batch['mask'].to(device)
+
+        mask = (mask > 0).detach_()
+        output = model(first_img, second_img)
+        loss = criterion(output[mask], target_flow[mask])
+
+        loss.backward()
+        optimizer.step()
+    return step
+
+
+def validate(model: PWCNetwork, val_loader, criterion, epoch, device="cuda"):
+    """validation Process"""
+    tot_loss = 0.0
+    num_batches = len(val_loader)
+
+    for i, batch in enumerate(val_loader):
+        clear_backwarp()
+        first_img = batch['left'].to(device)
+        second_img = batch['right'].to(device)
+        target_flow = batch['flow'].to(device)
+        mask = batch['mask'].to(device)
+
+        with torch.no_grad():
+            output = model(first_img, second_img)
+            loss = criterion(output[mask], target_flow[mask])
+            tot_loss += loss
+
+    avg_loss = tot_loss / num_batches
+    print('epoch: {:03} | avg loss: {:.5}'.format(epoch, avg_loss))
+    return avg_loss
+
+
+def inference(model, first_img, second_img):
+    # Note: first_img and second_img should *not* be proprocessed for the network
+    # pre-process
+    clear_backwarp()
+    pair = {'left': first_img, 'second': second_img}
+    pair = Normalize(pair, mean, std)
+    pair = ToTensor(pair)
+    h = pair['left'].size(1)
+    w = pair['left'].size(2)
+
+
+    first = pair['left']
+    second = pair['second']
+    with torch.no_grad():
+        output = model(first, second)
+
+
+
+
+def get_dataloader(datadir, batch_size, num_workers=1):
+    train_transform = T.Compose([Normalize(mean, std), ToTensor()])
+    train_dataset = KITTI2015_flow(datadir, mode='train', transform=train_transform)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+
+    validate_transform = T.Compose([Normalize(mean, std), ToTensor(), Pad(384, 1248)])
+    validate_dataset = KITTI2015_flow(datadir, mode='validate', transform=validate_transform)
+    validate_loader = DataLoader(validate_dataset, batch_size=batch_size, num_workers=num_workers)
+
+    test_transform = validate_transform
+    test_dataset = KITTI2015_flow(datadir, mode='test', transform=test_transform)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+
+    return train_loader, validate_loader, test_loader
 
 
 if __name__ is "__main__":
