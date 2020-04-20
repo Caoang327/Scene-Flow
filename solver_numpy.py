@@ -149,7 +149,7 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p):
     epsilon = 1e-5
     N = p.shape[0]
     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-    pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
+    pi_k, T, f = data['P_rect_20'], data['b_rgb'], data['f']
     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
     flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
     q = p + flow_q.T
@@ -180,7 +180,7 @@ def ransac(p, disparity1, disparity2, flow, alpha_p):
     - best_motion: the optimal motion, array of shape (6,)
     """
     num_iters = 5
-    epsilon = 0.1
+    epsilon = 5.5
     N = p.shape[0]
     num_inliers = 0
     idxset_best = []
@@ -192,7 +192,7 @@ def ransac(p, disparity1, disparity2, flow, alpha_p):
 
         # calculate residual
         data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-        pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
+        pi_k, T, f = data['P_rect_20'], data['b_rgb'], data['f']
         p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
         flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
         q = p + flow_q.T
@@ -291,7 +291,6 @@ def jacobian_flow(p_3d, p, fx, fy, pi_k, flow):
 
     JWJ = W.reshape(N, 1, 1) * np.matmul(J.transpose((0, 2, 1)), J)
     JWr = W.reshape(N, 1, 1) * np.matmul(J.transpose((0, 2, 1)), r.T.reshape(N, 2, 1))
-    print(J1)
     return JWJ, JWr
 
 
@@ -376,14 +375,14 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0)
     Outputs:
     - trans_matrix: the exponential mapping of the optimal motion, array of shape (4, 4)
     """
-    N = p.shape[0]
     trans_matrix = exp_map(motion_0)
     motion = motion_0
     num_iters = 20
     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-    pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
+    pi_k, T, f = data['P_rect_20'], data['b_rgb'], data['f']
     fx = fy = f  # temporary
     for i in range(num_iters):
+        N = p.shape[0]
         p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)
         p_homo = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
         p_3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
@@ -393,16 +392,21 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0)
         disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p)  # of shape (N, )
         q_3d = inverse_project(q, pi_k, disparity_q, T, f)
 
+        # delete the invalid points
+        p_3d_t2 = p_3d_t2[:, alpha_p[p[:, 1], p[:, 0]] == 1]
+        q_3d = q_3d[:, alpha_p[p[:, 1], p[:, 0]] == 1]
+        p = p[alpha_p[p[:, 1], p[:, 0]] == 1, :]
+
         JWJ1, JWr1 = jacobian_photometric(p_3d_t2, p, L0, L1, fx, fy, pi_k)
         JWJ2, JWr2 = jacobian_rigidfit(p_3d_t2, q_3d)
         JWJ3, JWr3 = jacobian_flow(p_3d_t2, p, fx, fy, pi_k, flow)
 
-        # dmotion = -np.linalg.inv(np.sum(JWJ1+JWJ2+JWJ3, axis=0)).dot(np.sum(JWr1+JWr2+JWr3, axis=0))  # of shape (6, 1)
+        # dmotion = -np.linalg.inv(np.sum(JWJ1+JWJ2+JWJ3, axis=0) + 1e-5).dot(np.sum(JWr1+JWr2+JWr3, axis=0))  # of shape (6, 1)
         dmotion = -np.linalg.inv(np.sum(JWJ2, axis=0)).dot(np.sum(JWr2, axis=0))  # of shape (6, 1)
 
-        motion = motion + dmotion.reshape(6)
-        trans_matrix = exp_map(motion)
-        # trans_matrix = trans_matrix.dot(exp_map(dmotion.reshape(6)))
+        # motion = motion + dmotion.reshape(6)
+        # trans_matrix = exp_map(motion)
+        trans_matrix = trans_matrix.dot(exp_map(dmotion.reshape(6)))
 
     return trans_matrix
 
@@ -461,61 +465,66 @@ result = util.flow_to_color(flow_gt.transpose(1, 2, 0))
 plt.imshow(result)
 plt.show()
 
-#
-# # flow_result = copy.deepcopy(flow)
-# flow_result = np.zeros_like(flow)
-# alpha_p = np.ones_like(disparity1)
-# motion_0 = np.ones(6)
-# for p in get_pointset(masks)[1:2]:
-#     # motion = ransac(p, disparity1, disparity2, flow, alpha_p)
-#
-#     res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
-#     motion = res.x
-#     # motion = np.array([-0.22473635, 1.77611658, 0.79445742, 0.04791862, -0.12645912, 0.05650632])
-#     # motion = motion_0
-#     print(motion)
-#
-#     # trans_matrix = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion)
-#     trans_matrix = exp_map(motion)
-#     # print(trans_matrix)
-#     # calculate 3d error
-#     N = p.shape[0]
-#     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-#     pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
-#     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
-#     flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
-#     q = p + flow_q.T
-#     disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p)  # of shape (N, )
-#     q_3d = inverse_project(q, pi_k, disparity_q, T, f)
-#     p_homo = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
-#     p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
-#     residual = p3d_t2 - q_3d
-#     print(np.sum(np.abs(residual), axis=0))
-#     print(np.sum(np.abs(residual)))
-#     # print(residual)
-#     # print(residual.shape)
-#
-#
-#     # calculate the instance-wise rigid flow estimation
-#     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-#     pi_k, T, f = data['Pik20'], data['b_rgb'], data['f']
-#     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
-#     N = p_3d.shape[1]
-#     p_3d_t2 = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
-#     p_3d_t2 = p_3d_t2 / p_3d_t2[3:4, :]
-#     p_homo = pi_k.dot(p_3d_t2)
-#     p_t2 = p_homo[:2, :] / p_homo[2:3, :]
-#     flow_rigid = p_t2 - p.T
-#     print(np.sum(np.abs(flow[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
-#     print(np.sum(np.abs(flow_gt[:, p[:, 1], p[:, 0]] - flow_rigid)) / N)
-#     # print(flow_result[:, p[:, 1], p[:, 0]])
-#     # print(flow_rigid)
-#     flow_result[:, p[:, 1], p[:, 0]] = flow_rigid
-#
-# result = util.flow_to_color(flow_result.transpose(1, 2, 0))
-# plt.imshow(result)
-# plt.show()
-#
+
+# flow_result = copy.deepcopy(flow)
+flow_result = np.zeros_like(flow)
+alpha_p = np.ones_like(disparity1).astype(int)
+motion_0 = np.ones(6)
+for p in get_pointset(masks)[15:16]:
+    # print(flow[:, p[:, 1], p[:, 0]])
+    # print(disparity1[p[:, 1], p[:, 0]])
+
+    # motion = ransac(p, disparity1, disparity2, flow, alpha_p)
+
+    res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
+    motion = res.x
+    # motion = np.array([-1.33551372e+00, 1.41114219e+00, 5.61324558e+00, -4.55258878e-02, -8.33163654e-02, 2.22574094e-03])
+    # motion = motion_0
+    print(motion)
+
+    trans_matrix = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion)
+    # trans_matrix = exp_map(motion)
+    # print(trans_matrix)
+    # calculate 3d error
+    data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
+    pi_k, T, f = data['P_rect_20'], data['b_rgb'], data['f']
+    p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
+    flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
+    q = p + flow_q.T
+    disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p)  # of shape (N, )
+    q_3d = inverse_project(q, pi_k, disparity_q, T, f)
+
+    # delete invalid points
+    p_3d = p_3d[:, alpha_p[p[:, 1], p[:, 0]] == 1]
+    q_3d = q_3d[:, alpha_p[p[:, 1], p[:, 0]] == 1]
+    p = p[alpha_p[p[:, 1], p[:, 0]] == 1, :]
+
+    N = p.shape[0]
+    p_homo = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+    p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
+    residual = p3d_t2 - q_3d
+    print(np.sum(np.abs(residual), axis=0))
+    print(np.sum(np.abs(residual)))
+    # print(residual)
+    # print(residual.shape)
+
+
+    # calculate the instance-wise rigid flow estimation
+    p_3d_t2 = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+    p_3d_t2 = p_3d_t2 / p_3d_t2[3:4, :]
+    p_homo = pi_k.dot(p_3d_t2)
+    p_t2 = p_homo[:2, :] / p_homo[2:3, :]
+    flow_rigid = p_t2 - p.T
+    print(np.sum(np.abs(flow[:, p[:, 1], p[:, 0]] - flow_rigid))/N)
+    print(np.sum(np.abs(flow_gt[:, p[:, 1], p[:, 0]] - flow_rigid)) / N)
+    # print(flow_result[:, p[:, 1], p[:, 0]])
+    # print(flow_rigid)
+    flow_result[:, p[:, 1], p[:, 0]] = flow_rigid
+
+result = util.flow_to_color(flow_result.transpose(1, 2, 0))
+plt.imshow(result)
+plt.show()
+
 # motion_gt = get_groundtruth(masks, flow_gt, disparity1_gt, disparity2_gt, mask_gt)[0]
 # print(np.sum((motion_gt-motion)**2))
 # print(np.sqrt(np.sum((motion - motion_gt)**2) / np.sum(motion_gt**2)))
@@ -525,6 +534,3 @@ plt.show()
 # print(np.sum((motion_gt-motion)**2))
 
 # print(motion)
-
-motion_gt = get_groundtruth(masks, flow_gt, disparity1_gt, disparity2_gt, mask_gt)
-print(motion_gt)
