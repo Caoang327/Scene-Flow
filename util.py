@@ -67,7 +67,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     data['R_rect_20'] = R_rect_20
     data['R_rect_30'] = R_rect_30
 
-    # Compute the rectified extrinsics from cam0 to camN
+    # Compute the rectified extrinsic from cam0 to camN
     T0 = np.eye(4)
     T0[0, 3] = P_rect_00[0, 3] / P_rect_00[0, 0]
     T1 = np.eye(4)
@@ -101,7 +101,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     data['b_gray'] = np.linalg.norm(p_velo1 - p_velo0)  # gray baseline
     data['b_rgb'] = np.linalg.norm(p_velo3 - p_velo2)   # rgb baseline
 
-    data['f'] = data['R_rect_30'][0,0]
+    data['f'] = data['P_rect_30'][0,0]
 
     pik00 = P_rect_00.dot(R_rect_00.dot(data['T_cam0_velo']))
     pik10 = P_rect_10.dot(R_rect_10.dot(data['T_cam1_velo']))
