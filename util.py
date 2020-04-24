@@ -1,6 +1,8 @@
 ## util function 
 
 import numpy as np
+import imageio
+from collections import OrderedDict
 
 def read_calib_file(filepath):
     """Read in a calibration file and parse into a dictionary."""
@@ -231,4 +233,41 @@ def flow_to_color(flow_uv, clip_flow=None, convert_to_bgr=False):
     v = v / (rad_max + epsilon)
 
     return flow_compute_color(u, v, convert_to_bgr)
+
+def get_gt_kitti(instance_img_path):
+    """ get the goundtruth from the kitti instance image file
+    Args:
+    --instance_img_path: the ground truth instance image file path
+    
+    Return:
+    
+    --gt: dict, with 'masks': NxHxW, 'semantic id', 'instance id'
+    """
+    instance_img = imageio.imread(instance_img_path)
+    
+    kitti_semantic = instance_img // 256 ## semantic id
+    kitti_instance = instance_img % 256  ## instance id 
+    
+    instance_map = kitti_instance > 0.0
+
+    masks = []
+    semantic_ids = [] 
+    instance_ids = []
+    for semantic_id in np.unique(instance_map * kitti_semantic):
+        if semantic_id == 0:
+            continue
+        semantic_ids.append(semantic_id)
+        semantic_mask = (kitti_semantic == semantic_id)
+        for instance_id in np.unique(kitti_instance * semantic_mask):
+            if instance_id == 0:
+                continue
+            instance_ids.append(instance_id)
+            instance_mask = (kitti_instance*semantic_mask) == instance_id
+            masks.append(np.expand_dims(instance_mask,0))
+    masks = np.concatenate(masks,0)
+    semantic_ids = np.array(semantic_ids)
+    instance_ids = np.array(instance_ids)
+    gt = OrderedDict()
+    gt.update({"masks":masks, "semantic_id":semantic_ids, "instance_ids":instance_ids})
+    return gt
 
