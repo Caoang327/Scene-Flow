@@ -3,6 +3,8 @@
 import numpy as np
 import imageio
 from collections import OrderedDict
+import cv2
+import os
 
 def read_calib_file(filepath):
     """Read in a calibration file and parse into a dictionary."""
@@ -271,3 +273,91 @@ def get_gt_kitti(instance_img_path):
     gt.update({"masks":masks, "semantic_id":semantic_ids, "instance_ids":instance_ids})
     return gt
 
+def _get_gt_kitti_flow(path):
+    # img_name = "/content/training/flow_occ/000000_10.png"
+    flow_raw = cv2.imread(path, cv2.IMREAD_UNCHANGED)[:, :, ::-1].astype(np.float)
+    # 20: the network was pre-trained with this factor (magic number:)
+    # data = {}
+    flow = (flow_raw[:, :, :2] - 2**15) / 64.0
+    mask = flow_raw[:, :, 2].astype(bool)
+    return flow, mask
+
+def _get_gt_kitti_disparity_single_file(path):
+    # Disparity
+    # first_img_name = "/content/training/disp_occ_0/000000_10.png"
+    # second_img_name = "/content/training/disp_occ_1/000000_10.png"
+
+    disp_first = cv2.imread(path, cv2.IMREAD_UNCHANGED).astype(np.float) / 256.0
+    # disp_second = cv2.imread(second_img_name, cv2.IMREAD_UNCHANGED).astype(np.float) / 256.0
+    # np.savez("disparity.npz", first=disp_first, second=disp_second)
+    return disp_first
+
+def get_gt(category, idx, root_path="./", mode="occ"):
+    """Helper function to obtain ground truth
+    
+    Parameters
+    ----------
+    category - str
+        choose from ["disparity", "flow"]
+    idx - int
+        index of the image whose ground truth will be retrived, limit 0 <= idx < 200
+    root_path - str
+        the path to the folder `training`, the directory of training is as follows:        
+            training
+            ├── disp_noc_0
+            ├── disp_noc_1
+            ├── disp_occ_0
+            ├── disp_occ_1
+            ├── flow_noc
+            ├── flow_occ
+            ├── image_2
+            ├── image_3
+            ├── obj_map
+            ├── viz_flow_occ
+            └── viz_flow_occ_dilate_1      
+
+    mode - str
+        (optional) choose from ["occ" (default), "ncc"] 
+
+    Returns
+    -------
+    data - dict<string, numpy.ndarray> or numpy.ndarray
+        if category = "flow", keys = {"flow", "mask"}
+        if category = "disparity", keys = {"first", "second"}
+    """
+    
+    # validation        
+    if idx < 0 or idx >= 200:
+        raise ValueError("idx out of range: [0, 200)")
+
+    data = {}
+
+    if category is "disparity":
+        first_path = os.path.join(root_path, "disp_{}_0".format(mode))
+        second_path = os.path.join(root_path, "disp_{}_1".format(mode))
+        file_name = "{:06}_10.png".format(idx)
+        first_path = os.path.join(first_path, file_name)
+        second_path = os.path.join(second_path, file_name)
+        if not os.path.exists(first_path):
+            raise FileNotFoundError("Not found: {}".format(first_path))
+        if not os.path.exists(second_path):
+            raise FileNotFoundError("Not found: {}".format(second_path))
+             
+        first = _get_gt_kitti_disparity_single_file(first_path)
+        second = _get_gt_kitti_disparity_single_file(second_path)
+        data = {"first": first, "second": second}
+    elif category is "flow":
+        directory = os.path.join(root_path, "flow_{}".format(mode))
+        file_name = "{:06}_10.png".format(idx)
+        directory = os.path.join(directory, file_name)
+        if not os.path.exists(directory):
+            raise FileNotFoundError("Not found: {}".format(directory))
+
+        flow, mask = _get_gt_kitti_flow(directory)
+        data['flow'] = flow
+        data['mask'] = mask
+
+    else:
+        raise ValueError("Unknown category {}, choose from ['disparity', 'flow;]".format(category))    
+    
+    return data
