@@ -64,7 +64,7 @@ def get_pointset(masks):
 
 def inverse_project(p, pi_k, d, T, f):
     """
-    Get 3d point in the world coordinate from pixel and disparity
+    Get 3d point in the camera coordinate from pixel and disparity
 
     Inputs:
     - p: image coordinates of the points, array of shape (N, 2)
@@ -138,18 +138,11 @@ def bilinear_interpolate_numpy(im, q, alpha_p=None, p=None, flag=True, if_biline
     if flag:
         alpha_p[p[result == 0, 1], p[result == 0, 0]] = 0
         result[result == 0] = 1
-        # alpha_p[p[result < 0.01, 1], p[result < 0.01, 0]] = 0
-        # result[result < 0.01] = 1
-        # alpha_p[p[(Ia == 0)& (Ib == 0) & (Ic == 0) & (Id == 0), 1], p[(Ia == 0)& (Ib == 0) & (Ic == 0) & (Id == 0), 0]] = 0
-        # alpha_p[p[Ia == 0, 1], p[Ia == 0, 0]] = 0
-        # alpha_p[p[Ib == 0, 1], p[Ib == 0, 0]] = 0
-        # alpha_p[p[Ic == 0, 1], p[Ic == 0, 0]] = 0
-        # alpha_p[p[Id == 0, 1], p[Id == 0, 0]] = 0
+
     return result
-    # return torch.t((torch.t(Ia) * wa)) + torch.t(torch.t(Ib) * wb) + torch.t(torch.t(Ic) * wc) + torch.t(torch.t(Id) * wd)
 
 
-def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, if_bilinear=True, is_gt=False):
+def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, if_bilinear=True, is_gt=False):
     """
     Calculate the E_rigid
 
@@ -160,17 +153,18 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, if_bilinear=
     - disparity2: disparity map of time t+1, array of shape (m, n)
     - flow: flow matrix of 1st img, array of shape (2, m, n)
     - alpha_p: indicators representing if it is a outlier, array of shape (m, n)
+    - pi_k: perspective project function, array of shape (3, 3)
+    - T: length of baseline, scalar
+    - f: focal length, scalar
     - if_bilinear: if use bilinear way to interoplation
+    - is_gt: indicate if it is called for ground truth
 
     Outputs:
     - E: value of E_rigid, array fo shape (N,)
     """
     alpha = 0.225
-    # alpha = 0.5
     epsilon = 1e-5
     N = p.shape[0]
-    data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-    pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
     flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
     q = p + flow_q.T
@@ -189,7 +183,58 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, if_bilinear=
     return E
 
 
-def ransac(p, disparity1, disparity2, flow, alpha_p):
+# def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, if_bilinear=True, is_gt=False):
+#     """
+#     Calculate the E_rigid
+#
+#     Inputs:
+#     - motion: rigid motion representation in se(3), array of shape (6,)
+#     - p: point set of one instance in 1st img, array of shape (N, 2)
+#     - disparity1: disparity map of time t, array of shape (m, n)
+#     - disparity2: disparity map of time t+1, array of shape (m, n)
+#     - flow: flow matrix of 1st img, array of shape (2, m, n)
+#     - alpha_p: indicators representing if it is a outlier, array of shape (m, n)
+#     - L0, L1: left image at time t & t+1, array of shape (m, n, 3)
+#     - if_bilinear: if use bilinear way to interpolation
+#     - is_gt: indicate if it is called for ground truth
+#
+#     Outputs:
+#     - E: value of E_rigid, array fo shape (N,)
+#     """
+#     alpha = 0.225
+#     # alpha = 0.5
+#     epsilon = 1e-5
+#     N = p.shape[0]
+#     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
+#     pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
+#     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
+#     flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
+#     q = p + flow_q.T
+#     if is_gt:
+#         q_3d = inverse_project(q, pi_k, disparity2[p[:, 1], p[:, 0]], T, f)
+#     else:
+#         disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p, if_bilinear=if_bilinear)  # of shape (N, )
+#         q_3d = inverse_project(q, pi_k, disparity_q, T, f)
+#     p_homo = exp_map(motion).dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+#     p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
+#     r_rigid = p3d_t2 - q_3d  # of shape (3, N)
+#     p_homo = pi_k.dot(p3d_t2)
+#     p_t2 = p_homo[:2, :] / p_homo[2:3, :]
+#     r_flow = p_t2 - p.T - flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
+#     r_photo = bilinear_interpolate_numpy(L1, p_t2.T, flag=False) - L0[p[:, 1], p[:, 0], :]  # of shape (N, 3)
+#     r_photo = r_photo.T
+#     E_rigid = (np.sum(r_rigid ** 2, axis=0) + epsilon ** 2) ** alpha
+#     E_flow = (np.sum(r_flow ** 2, axis=0) + epsilon ** 2) ** alpha
+#     E_photo = (np.sum(r_photo ** 2, axis=0) + epsilon ** 2) ** alpha
+#
+#     # print(np.sum(np.abs(residual), axis=0))
+#     # print(residual)
+#     E = (E_rigid + E_flow + E_photo) * alpha_p[p[:, 1], p[:, 0]]
+#
+#     return E
+
+
+def ransac(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f):
     """
     Implement RANSAC algorithm to find the optimal motion
 
@@ -199,6 +244,9 @@ def ransac(p, disparity1, disparity2, flow, alpha_p):
     - disparity2: disparity map of time t+1, array of shape (m, n)
     - flow: flow matrix of 1st img, array of shape (2, m, n)
     - alpha_p: indicators representing if it is a outlier, array of shape (m, n)
+    - pi_k: perspective project function, array of shape (3, 3)
+    - T: length of baseline, scalar
+    - f: focal length, scalar
 
     Outputs:
     - best_motion: the optimal motion, array of shape (6,)
@@ -211,12 +259,10 @@ def ransac(p, disparity1, disparity2, flow, alpha_p):
     motion_0 = np.ones(6)
     for i in range(num_iters):
         idx = np.random.choice(N, N//15, replace=False)
-        res = least_squares(cost_function, motion_0, args=(p[idx, :], disparity1, disparity2, flow, alpha_p))
+        res = least_squares(cost_function, motion_0, args=(p[idx, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
         motion = res.x
 
         # calculate residual
-        data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-        pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
         p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
         flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
         q = p + flow_q.T
@@ -228,14 +274,8 @@ def ransac(p, disparity1, disparity2, flow, alpha_p):
         if num_inliers < np.sum(residual < epsilon):
             idxset_best = np.argwhere(residual < epsilon)[:, 0]
             num_inliers = np.sum(residual < epsilon)
-    best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p))
+    best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
     best_motion = best_res.x
-    # alpha_p[p[residual > epsilon, 1], p[residual > epsilon, 0]] = 0
-    p = p[idxset_best, :]
-    # print(best_res.cost)
-    # print(num_inliers, N)
-    # print(residual)
-    # print(cost_function(best_motion, p, disparity1, disparity2, flow, alpha_p))
 
     return best_motion, p
 
@@ -385,7 +425,7 @@ def jacobian_photometric(p_3d, p, L0, L1, fx, fy, pi_k):
     return JWJ, JWr
 
 
-def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0, is_gt=False, is_bg=False):
+def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0, pi_k, T, f, is_gt=False, is_bg=False):
     """
     Implement Gaussian Newton solver
 
@@ -397,6 +437,9 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0,
     - alpha_p: indicators representing if it is a outlier, array of shape (m, n)
     - L0, L1: left image at time t & t+1, array of shape (m, n, 3)
     - motion_0: initialization of 3D motion, array of shape (6,)
+    - pi_k: perspective project function, array of shape (3, 3)
+    - T: length of baseline, scalar
+    - f: focal length, scalar
     - is_gt: indicate if it is called for ground truth
     - is_bg: indicate if it is called for background
 
@@ -405,11 +448,8 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0,
     - motion : the optimal motion, array of shape (4, 4)
     """
     trans_matrix = exp_map(motion_0)
-    trans_matrix1 = exp_map(motion_0)
     motion = motion_0
     num_iters = 30
-    data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-    pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
     fx = fy = f  # temporary
     cost = []
     best_motion = motion_0
@@ -454,9 +494,7 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0,
 
         motion = motion + dmotion.reshape(6)
         trans_matrix = exp_map(motion)
-        trans_matrix1 = trans_matrix1.dot(exp_map(dmotion.reshape(6)))
-        # error = trans_matrix - trans_matrix1
-        # print(error)
+        # trans_matrix1 = trans_matrix1.dot(exp_map(dmotion.reshape(6)))
 
     trans_matrix = exp_map(best_motion)
     # print(cost)
@@ -468,7 +506,7 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0,
     return trans_matrix, best_motion
 
 
-def get_groundtruth(masks, flow, disparity1, disparity2, alpha_p):
+def get_groundtruth(masks, flow, disparity1, disparity2, alpha_p, pi_k, T, f):
     """
     Find the optimal motion using the ground truth of flow, mask, and disparity
 
@@ -478,6 +516,9 @@ def get_groundtruth(masks, flow, disparity1, disparity2, alpha_p):
     - disparity1: the ground truth of disparity map at time t, array of shape (m, n)
     - disparity2: the ground truth of disparity map at time t+1, array of shape (m, n)
     - alpha_p: the mask matrix indicating if the point is valid
+    - pi_k: perspective project function, array of shape (3, 3)
+    - T: length of baseline, scalar
+    - f: focal length, scalar
 
     Outputs:
     - motions: the list of optimal motions, list<array of shape (6, )>
@@ -504,26 +545,22 @@ def get_groundtruth(masks, flow, disparity1, disparity2, alpha_p):
     motions = []
     motion_map = np.ones((disparity1.shape[0], disparity1.shape[1], 6))
     point_map = np.ones((disparity1.shape[0], disparity1.shape[1], 3))
-    for t, p in enumerate(p_set):
-        res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p, False, True))
+    for t, p in enumerate(p_set[:-1]):
+        res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, False, True))
         motion_gt = res.x
 
         if t != (len(p_set) - 1):
-            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, is_gt=True)
+            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, pi_k, T, f, is_gt=True)
         else:
-            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, is_gt=True, is_bg=True)
+            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, pi_k, T, f, is_gt=True, is_bg=False)
         motions.append(motion_gt)
 
         motion_map[p[:, 1], p[:, 0], :] = motion_gt
         # test errors
         # trans_matrix = exp_map(motion_gt)
-        data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-        pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
         p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
         flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
         q = p + flow_q.T
-        # disparity_q = bilinear_interpolate_numpy(disparity2, q, alpha_p, p, if_bilinear=False)  # of shape (N, )
-        # q_3d = inverse_project(q, pi_k, disparity_q, T, f)
         q_3d = inverse_project(q, pi_k, disparity2[p[:, 1], p[:, 0]], T, f)
 
         # delete invalid points
@@ -533,29 +570,30 @@ def get_groundtruth(masks, flow, disparity1, disparity2, alpha_p):
 
         point_map[p[:, 1], p[:, 0], :] = q_3d.T
 
-        # N = p.shape[0]
-        # p_homo = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
-        #
-        # p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
-        # residual = p3d_t2 - q_3d
-        # print(t)
-        # t += 1
-        # print(np.sum(np.abs(residual), axis=0))
-        # print(np.sum(np.abs(residual)))
-        # print(np.median(np.sum(np.abs(residual), axis=0)))
+        N = p.shape[0]
+        p_homo = trans_matrix.dot(np.concatenate((p_3d, np.ones((1, N))), axis=0))
+
+        p3d_t2 = p_homo[:3, :] / p_homo[3:4, :]
+        residual = p3d_t2 - q_3d
+        print(t)
+        t += 1
+        print(np.sum(np.abs(residual), axis=0))
+        print(np.sum(np.abs(residual)))
+        print(np.median(np.sum(np.abs(residual), axis=0)))
+        print(N)
 
     return motions, motion_map, point_map, alpha_p
 
 
-masks = np.load("pmask_left_t0.npy")
+masks = np.load("mask_000006_10.npy")
 # flow = np.load("flow_new.npy").transpose(2, 0, 1)
 # flow = np.load("pwc_image_2.npy")
-flow = np.load('flow.npy').transpose(2, 0, 1)
-# disparity = np.load("disparity(1).npz")
-# disparity1, disparity2 = disparity["first"], disparity["second"]
+flow = np.load('flow_006.npy').transpose(2, 0, 1)
+disparity = np.load("disparity_006.npz")
+disparity1, disparity2 = disparity["first"], disparity["second"]
 
-disparity1 = np.load("disparity1.npy")
-disparity2 = np.load("disparity2.npy")
+# disparity1 = np.load("disparity1.npy")
+# disparity2 = np.load("disparity2.npy")
 L0 = np.array(PIL.Image.open("left_000000_10.png")).astype(np.float32) * (1.0 / 255.0)
 L1 = np.array(PIL.Image.open("left_000000_11.png")).astype(np.float32) * (1.0 / 255.0)
 
@@ -569,7 +607,7 @@ flow_gt, mask_gt = flow_data["flow"].transpose(2, 0, 1) * 20, flow_data["mask"] 
 with open('img2_000000_10.pickle', 'rb') as handle:
     masks_gt = pickle.load(handle)['masks']
 
-# motion_gt, motion_map_gt, point_map_gt, alpha_p_gt = get_groundtruth(masks_gt, flow_gt, disparity1_gt, disparity2_gt, mask_gt)
+# motion_gt, motion_map_gt, point_map_gt, alpha_p_gt = get_groundtruth(masks_gt, flow_gt, disparity1_gt, disparity2_gt, mask_gt, pi_k, T, f)
 
 result = util.flow_to_color(flow.transpose(1, 2, 0))
 plt.imshow(result)
@@ -646,25 +684,25 @@ point_set = get_pointset(masks)
 data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
 pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
 
-for t, p in enumerate(point_set):
+for t, p in enumerate(point_set[:-1]):
     # print(flow[:, p[:, 1], p[:, 0]])
     # print(disparity1[p[:, 1], p[:, 0]])
 
-    motion, p_inlier = ransac(p, disparity1, disparity2, flow, alpha_p)
+    motion, p_inlier = ransac(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f)
     # p = p_inlier
 
-    # res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p))
+    # res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f))
     # motion = res.x
     # motion = np.array([-1.33551372e+00, 1.41114219e+00, 5.61324558e+00, -4.55258878e-02, -8.33163654e-02, 2.22574094e-03])  # 1
     # motion = np.array([0.59305141, 0.9614412, 1.81942165, -0.33966084, 0.02325005, 0.56535765])  # 15
     # motion = motion_0
     print(motion)
 
-    # trans_matrix, motion = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion)
+    # trans_matrix, motion = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f)
     if t != (len(point_set) - 1):
-        trans_matrix, motion = gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion)
+        trans_matrix, motion = gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f)
     else:
-        trans_matrix, motion = gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, is_bg=True)
+        trans_matrix, motion = gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f, is_bg=False)
     best_motions.append(motion)
 
     motion_map[p[:, 1], p[:, 0], :] = motion
@@ -739,7 +777,7 @@ plt.colorbar()
 plt.title('Errors before (PWC)')
 plt.show()
 
-motion_gt, motion_map_gt, point_map_gt, alpha_p_gt = get_groundtruth(masks_gt, flow_gt, disparity1_gt, disparity2_gt, mask_gt)
+motion_gt, motion_map_gt, point_map_gt, alpha_p_gt = get_groundtruth(masks_gt, flow_gt, disparity1_gt, disparity2_gt, mask_gt, pi_k, T, f)
 
 result = np.sqrt(np.sum((motion_map-motion_map_gt)**2, axis=2) / np.sum(motion_map_gt**2, axis=2))
 result = np.ma.masked_where((alpha_p & alpha_p_gt)==False, result)
@@ -751,7 +789,7 @@ plt.show()
 
 result = np.sqrt(np.sum((motion_map-motion_map_gt)**2, axis=2))
 result = np.ma.masked_where((alpha_p & alpha_p_gt)==False, result)
-plt.imshow(result, cmap='bwr')
+plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
 plt.axis('off')
 plt.colorbar()
 plt.title('Root square errors of motion')
@@ -767,7 +805,7 @@ plt.show()
 
 result = np.sqrt(np.sum((point_map-point_map_gt)**2, axis=2))
 result = np.ma.masked_where((alpha_p & alpha_p_gt)==False, result)
-plt.imshow(result, cmap='bwr')
+plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
 plt.axis('off')
 plt.title('Root square errors of motion')
 plt.colorbar()
@@ -778,22 +816,22 @@ plt.show()
 # plt.colorbar()
 # plt.show()
 
-np.save('motion_map_gt.npy', motion_map_gt)
-np.save('motion_map.npy', motion_map)
-np.save('alpha_p.npy', alpha_p)
-np.save('alpha_p_gt.npy', alpha_p_gt)
-np.save('flow_result.npy', flow_result)
-np.save('flow_ini.npy', flow_ini)
-np.save('mask_gt.npy', mask_gt)
+# np.save('motion_map_gt.npy', motion_map_gt)
+# np.save('motion_map.npy', motion_map)
+# np.save('alpha_p.npy', alpha_p)
+# np.save('alpha_p_gt.npy', alpha_p_gt)
+# np.save('flow_result.npy', flow_result)
+# np.save('flow_ini.npy', flow_ini)
+# np.save('mask_gt.npy', mask_gt)
 
-for i in range(len(motion_gt)):
-    if len(motion_gt[i]):
-        print(i, "gt", motion_gt[i])
-        print(i, "estimated", best_motions[i])
-        print(i, np.sqrt(np.sum((motion_gt[i] - best_motions[i])**2)))
-        print(i, np.sqrt(np.sum((motion_gt[i] - best_motions[i])**2) / np.sum(motion_gt[i]**2)))
-        print(i, np.sqrt(np.sum((exp_map(motion_gt[i]) - exp_map(best_motions[i]))**2)))
-        print(i, np.sqrt(np.sum((exp_map(motion_gt[i]) - exp_map(best_motions[i])) ** 2) / np.sum(exp_map(motion_gt[i])**2)))
+# for i in range(len(motion_gt)):
+#     if len(motion_gt[i]):
+#         print(i, "gt", motion_gt[i])
+#         print(i, "estimated", best_motions[i])
+#         print(i, np.sqrt(np.sum((motion_gt[i] - best_motions[i])**2)))
+#         print(i, np.sqrt(np.sum((motion_gt[i] - best_motions[i])**2) / np.sum(motion_gt[i]**2)))
+#         print(i, np.sqrt(np.sum((exp_map(motion_gt[i]) - exp_map(best_motions[i]))**2)))
+#         print(i, np.sqrt(np.sum((exp_map(motion_gt[i]) - exp_map(best_motions[i])) ** 2) / np.sum(exp_map(motion_gt[i])**2)))
 
 # print(np.sum((motion_gt-motion)**2))
 # print(np.sqrt(np.sum((motion - motion_gt)**2) / np.sum(motion_gt**2)))
