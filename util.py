@@ -377,16 +377,17 @@ def get_mask_gt(masks,alpha_p):
 
 def disp_error(D_gt, D_est, tau, mask):
     E = np.abs(D_gt - D_est)
-    n_err = np.sum(mask == 1 & E>tau[0] & (E/np.abs(D_gt))>tau[1] )
+    n_err = np.sum((mask == 1) & (E>tau[0]) & ((E/np.abs(D_gt))>tau[1]))
     n_total = np.sum(mask == 1)
     d_err = n_err / n_total
     return d_err
+
 
 def flow_err(F_gt, F_est, flow_mask, tau):
     E, F_val = flow_error_map(F_gt, F_est, flow_mask)
 
     F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
-    n_err = np.sum(F_val & E>tau[0] & ((E/F_mag)>tau[1]))
+    n_err = np.sum(F_val & (E>tau[0]) & ((E/F_mag)>tau[1]))
     n_total = np.sum(F_val)
 
     f_err = n_err/n_total
@@ -414,9 +415,9 @@ def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
     E_d1 = np.abs(D1_gt - D1_est)
     E_d2 = np.abs(D2_gt - D2_est)
 
-    err_d1 = (mask == 1 & E_d1>tau[0] & (E_d1/np.abs(D1_gt))>tau[1])
-    err_d2 = (mask == 1 & E_d2>tau[0] & (E_d2/np.abs(D2_gt))>tau[1])
-    err_f = F_val_f & E_f>tau[0] & ((E_f/F_mag)>tau[1])
+    err_d1 = ((mask == 1) & (E_d1>tau[0]) & ((E_d1/np.abs(D1_gt))>tau[1]))
+    err_d2 = ((mask == 1) & (E_d2>tau[0]) & ((E_d2/np.abs(D2_gt))>tau[1]))
+    err_f = F_val_f & (E_f>tau[0]) & ((E_f/F_mag)>tau[1])
 
     n_err = np.sum(err_d1 | err_d2 | err_f)
     n_total = np.sum(mask == 1)
