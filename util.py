@@ -459,6 +459,9 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
             output_file_name = "{:06}_10.npy".format(idx)
             output_flow = np.load(os.path.join(path_output, output_file_name))
 
+            flow_gt = flow_gt.transpose(2, 0, 1)
+            output_flow = output_flow.transpose(2, 0, 1)
+
             outlier_this_all = flow_err(flow_gt, output_flow, tau, mask_gt)
 
             # retrieve object mask
@@ -539,6 +542,7 @@ def sf_warpper(gt_path, output_path, tau=[3, 0.05]):
         D1_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_0", disp1_gt_filename))
         D2_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_1", disp2_gt_filename))
         F_gt, mask_F = _get_gt_kitti_flow(os.path.join(gt_path, "flow_occ", flow_gt_filename))
+        F_gt = F_gt.transpose(2, 0, 1)
 
         disp1_est_filename = "{:06}_10.npy".format(idx)
         disp2_est_filename = "{:06}_11.npy".format(idx)
@@ -547,10 +551,11 @@ def sf_warpper(gt_path, output_path, tau=[3, 0.05]):
         D1_est = np.load(os.path.join(output_path, "disparity_0", disp1_est_filename))
         D2_est = np.load(os.path.join(output_path, "disparity_1", disp2_est_filename))
         # warp disparity with flow GT
-        u = F_gt[:, :, 0]
-        v = F_gt[:, :, 1]
+        u = F_gt[0, :, :]
+        v = F_gt[1, :, :]
         D2_est = warp_flow_fast(D2_est[:, :, np.newaxis], u, v).squeeze()
         F_est = np.load(os.path.join(output_path, "flow", flow_est_filename))
+        F_est = F_est.transpose(2, 0, 1)
 
         mask_d1 = D1_gt > 0
         mask_d2 = D2_gt > 0
