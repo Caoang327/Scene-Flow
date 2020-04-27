@@ -5,6 +5,8 @@ import imageio
 from collections import OrderedDict
 import cv2
 import os
+import scipy
+import scipy.ndimage
 
 def read_calib_file(filepath):
     """Read in a calibration file and parse into a dictionary."""
@@ -414,7 +416,7 @@ def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
 
     err_d1 = (mask == 1 & E_d1>tau[0] & (E_d1/np.abs(D1_gt))>tau[1])
     err_d2 = (mask == 1 & E_d2>tau[0] & (E_d2/np.abs(D2_gt))>tau[1])
-    err_f = F_val & E_f>tau[0] & ((E_f/F_mag)>tau[1])
+    err_f = F_val_f & E_f>tau[0] & ((E_f/F_mag)>tau[1])
 
     n_err = np.sum(err_d1 | err_d2 | err_f)
     n_total = np.sum(mask == 1)
@@ -422,18 +424,34 @@ def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
     f_err = n_err / n_total
     return f_err
 
-def outlier(category, gt, output, mask):
+def warp_flow_fast(im2, u, v):
+    """
+    im2 warped according to (u,v).
+    This is a helper function that is used to warp an image to make it match another image
+    (in this case, I2 is warped to I1).
+    Assumes im1[y, x] = im2[y + v[y, x], x + u[y, x]]
+    """
+    # this code is confusing because we assume vx and vy are the negative
+    # of where to send each pixel, as in the results by ce's siftflow code
+    y, x = np.mgrid[:im2.shape[0], :im2.shape[1]]
+    dy = (y + v).flatten()[np.newaxis, :]
+    dx = (x + u).flatten()[np.newaxis, :]
+    # this says: a recipe for making im1 is to make a new image where im[y, x] = im2[y + flow[y, x, 1], x + flow[y, x, 0]]
+    return np.concatenate([scipy.ndimage.map_coordinates(im2[..., i], np.concatenate([dy, dx])).reshape(im2.shape[:2] + (1,)) \
+                           for i in range(im2.shape[2])], axis = 2)
 
-    pass
 
-
-def outlier_warpper(category: str, path_gt: str, path_output: str, mode: int = 0, tau=[3, 0.05]):
+def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str, mode: int = 0, tau=[3, 0.05], path_flow=None):
     # mode: choose from 0 or 1 if category is "disparity"
+    # path_flow: if category = "disparity" and mode=1, path_flow is necessary
     assert os.path.exists(path_gt)
     assert os.path.exists(path_output)
 
     tot = 0
-    outlier_pctg_sum = 0.
+    outlier_all = 0.
+    outlier_fg = 0.
+    outlier_bg = 0.
+
     if category is "flow":
         for idx in range(200):
             gt_file_name = "{:06}_10.png".format(idx)
@@ -441,30 +459,70 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, mode: int = 0
             output_file_name = "{:06}_10.npy".format(idx)
             output_flow = np.load(os.path.join(path_output, output_file_name))
 
-            outlier_this = flow_err(flow_gt, output_flow, tau, mask_gt)
+            outlier_this_all = flow_err(flow_gt, output_flow, tau, mask_gt)
+
+            # retrieve object mask
+            obj_file_name = "{:06}_10.npy".format(idx)
+            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
+            mask_fg = np.sum(obj_mask, axis=2) > 0
+            mask_bg = np.logical_not(mask_fg)
+
+            outlier_this_fg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_fg, mask_gt))
+            outlier_this_bg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_bg, mask_gt))
+
 
             # for debug purpose
-            print("Image #{}: Ratio: {}".format(idx, outlier_this))
-            outlier_pctg_sum += outlier_this
+            print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
+            outlier_all += outlier_this_all
+            outlier_bg += outlier_this_bg
+            outlier_fg += outlier_this_fg
             tot += 1
     elif category is "disparity":
+        if mode == 1:
+            assert path_flow is not None and os.path.exists(path_flow)
+
         for idx in range(200):
-            gt_file_name = "{:06}_10.png".format(idx)
-            disp_gt = _get_gt_kitti_disparity_single_file(os.path.join(path_gt, gt_file_name))
             if mode == 0:
-                output_file_name = "{:06}_10.png".format(idx)
+                gt_file_name = "{:06}_10.png".format(idx)
+                output_file_name = "{:06}_10.npy".format(idx)
+                output_disp = np.load(os.path.join(path_output, output_file_name))
+            elif mode == 1:
+                gt_file_name = "{:06}_11.png".format(idx)
+                output_file_name = "{:06}_11.npy".format(idx)
+                output_disp = np.load(os.path.join(path_output, output_file_name))
+                # warp to figure 1
+                # read in flow
+                gt_flow_file_name = "{:06}_10.png".format(idx)
+                flow_gt, _ = _get_gt_kitti_flow(os.path.join(path_flow, gt_flow_file_name))
+                u = flow_gt[:, :, 0]
+                v = flow_gt[:, :, 1]
+                output_disp = warp_flow_fast(output_disp[:, :, np.newaxis], u, v).squeeze()
             else:
-                output_file_name = "{:06}_11.png".format(idx)
-            output_disp = np.load(os.path.join(path_output, output_file_name))
+                raise ValueError("mode not known: {}".format(mode))
+
+            disp_gt = _get_gt_kitti_disparity_single_file(os.path.join(path_gt, gt_file_name))
+            # output_disp = np.load(os.path.join(path_output, output_file_name))
             mask_gt = (disp_gt > 0).astype(int)
-            outlier_this = disp_error(disp_gt, output_disp, mask_gt)
+            outlier_this_all = disp_error(disp_gt, output_disp, mask_gt)
+
+            # retrieve object mask
+            obj_file_name = "{:06}_10.npy".format(idx)
+            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
+            mask_fg = np.sum(obj_mask, axis=2) > 0
+            mask_bg = np.logical_not(mask_fg)
+
+            outlier_this_fg = disp_error(disp_gt, output_disp, tau, np.logical_and(mask_fg, mask_gt))
+            outlier_this_bg = flow_err(disp_gt, output_disp, tau, np.logical_and(mask_bg, mask_gt))
 
             # for debug purpose
-            print("Image #{}: Ratio: {}".format(idx, outlier_this))
-
-            outlier_pctg_sum += outlier_this
+            print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
+            outlier_all += outlier_this_all
+            outlier_bg += outlier_this_bg
+            outlier_fg += outlier_this_fg
             tot += 1
     else:
         raise ValueError("category not known {}".format(category))
 
-    return outlier_pctg_sum / tot
+    print("Summary:\n"
+          "Outlier ratio per image: {}".format(outlier_all / tot))
+    return outlier_all / tot
