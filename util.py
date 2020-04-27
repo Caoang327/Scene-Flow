@@ -92,7 +92,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     # Compute the camera intrinsics
     data['K_cam0'] = P_rect_00[0:3, 0:3]
     data['K_cam1'] = P_rect_10[0:3, 0:3]
-    data['K_cam2'] = P_rect_20[0:3, 0:3] / 1000
+    data['K_cam2'] = P_rect_20[0:3, 0:3]
     data['K_cam3'] = P_rect_30[0:3, 0:3]
 
     # Compute the stereo baselines in meters by projecting the origin of
@@ -107,7 +107,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     data['b_gray'] = np.linalg.norm(p_velo1 - p_velo0)  # gray baseline
     data['b_rgb'] = np.linalg.norm(p_velo3 - p_velo2)   # rgb baseline
 
-    data['f'] = data['P_rect_30'][0,0] / 1000
+    data['f'] = data['P_rect_30'][0,0]
 
     pik00 = P_rect_00.dot(R_rect_00.dot(data['T_cam0_velo']))
     pik10 = P_rect_10.dot(R_rect_10.dot(data['T_cam1_velo']))
@@ -377,16 +377,17 @@ def get_mask_gt(masks,alpha_p):
 
 def disp_error(D_gt, D_est, tau, mask):
     E = np.abs(D_gt - D_est)
-    n_err = np.sum(mask == 1 & E>tau[0] & (E/np.abs(D_gt))>tau[1] )
+    n_err = np.sum((mask == 1) & (E>tau[0]) & ((E/np.abs(D_gt))>tau[1]))
     n_total = np.sum(mask == 1)
     d_err = n_err / n_total
     return d_err
+
 
 def flow_err(F_gt, F_est, flow_mask, tau):
     E, F_val = flow_error_map(F_gt, F_est, flow_mask)
 
     F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
-    n_err = np.sum(F_val & E>tau[0] & ((E/F_mag)>tau[1]))
+    n_err = np.sum(F_val & (E>tau[0]) & ((E/F_mag)>tau[1]))
     n_total = np.sum(F_val)
 
     f_err = n_err/n_total
@@ -414,9 +415,9 @@ def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
     E_d1 = np.abs(D1_gt - D1_est)
     E_d2 = np.abs(D2_gt - D2_est)
 
-    err_d1 = (mask == 1 & E_d1>tau[0] & (E_d1/np.abs(D1_gt))>tau[1])
-    err_d2 = (mask == 1 & E_d2>tau[0] & (E_d2/np.abs(D2_gt))>tau[1])
-    err_f = F_val_f & E_f>tau[0] & ((E_f/F_mag)>tau[1])
+    err_d1 = ((mask == 1) & (E_d1>tau[0]) & ((E_d1/np.abs(D1_gt))>tau[1]))
+    err_d2 = ((mask == 1) & (E_d2>tau[0]) & ((E_d2/np.abs(D2_gt))>tau[1]))
+    err_f = F_val_f & (E_f>tau[0]) & ((E_f/F_mag)>tau[1])
 
     n_err = np.sum(err_d1 | err_d2 | err_f)
     n_total = np.sum(mask == 1)
