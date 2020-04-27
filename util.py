@@ -321,7 +321,7 @@ def get_gt(category, idx, root_path="./", mode="occ"):
 
     Returns
     -------
-    data - dict<string, numpy.ndarray> or numpy.ndarray
+    data - dict<string, numpy.ndarray>
         if category = "flow", keys = {"flow", "mask"}
         if category = "disparity", keys = {"first", "second"}
     """
