@@ -321,7 +321,7 @@ def get_gt(category, idx, root_path="./", mode="occ"):
 
     Returns
     -------
-    data - dict<string, numpy.ndarray> or numpy.ndarray
+    data - dict<string, numpy.ndarray>
         if category = "flow", keys = {"flow", "mask"}
         if category = "disparity", keys = {"first", "second"}
     """
@@ -361,7 +361,6 @@ def get_gt(category, idx, root_path="./", mode="occ"):
         raise ValueError("Unknown category {}, choose from ['disparity', 'flow;]".format(category))    
     
     return data
-
 
 def get_mask_gt(masks,alpha_p):
     mask_bg = np.ones_like(masks[0]) == 1
@@ -406,7 +405,6 @@ def flow_error_map(F_gt, F_est, flow_mask):
     E[flow_mask ==0] = 0
     return E, F_gt_val
 
-
 def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
     E_f, F_val_f = flow_error_map(F_gt, F_est, mask)
     F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
@@ -423,3 +421,50 @@ def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
 
     f_err = n_err / n_total
     return f_err
+
+def outlier(category, gt, output, mask):
+
+    pass
+
+
+def outlier_warpper(category: str, path_gt: str, path_output: str, mode: int = 0, tau=[3, 0.05]):
+    # mode: choose from 0 or 1 if category is "disparity"
+    assert os.path.exists(path_gt)
+    assert os.path.exists(path_output)
+
+    tot = 0
+    outlier_pctg_sum = 0.
+    if category is "flow":
+        for idx in range(200):
+            gt_file_name = "{:06}_10.png".format(idx)
+            flow_gt, mask_gt = _get_gt_kitti_flow(os.path.join(path_gt, gt_file_name))
+            output_file_name = "{:06}_10.npy".format(idx)
+            output_flow = np.load(os.path.join(path_output, output_file_name))
+
+            outlier_this = flow_err(flow_gt, output_flow, tau, mask_gt)
+
+            # for debug purpose
+            print("Image #{}: Ratio: {}".format(idx, outlier_this))
+            outlier_pctg_sum += outlier_this
+            tot += 1
+    elif category is "disparity":
+        for idx in range(200):
+            gt_file_name = "{:06}_10.png".format(idx)
+            disp_gt = _get_gt_kitti_disparity_single_file(os.path.join(path_gt, gt_file_name))
+            if mode == 0:
+                output_file_name = "{:06}_10.png".format(idx)
+            else:
+                output_file_name = "{:06}_11.png".format(idx)
+            output_disp = np.load(os.path.join(path_output, output_file_name))
+            mask_gt = (disp_gt > 0).astype(int)
+            outlier_this = disp_error(disp_gt, output_disp, mask_gt)
+
+            # for debug purpose
+            print("Image #{}: Ratio: {}".format(idx, outlier_this))
+
+            outlier_pctg_sum += outlier_this
+            tot += 1
+    else:
+        raise ValueError("category not known {}".format(category))
+
+    return outlier_pctg_sum / tot
