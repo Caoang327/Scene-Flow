@@ -470,7 +470,6 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
             outlier_this_fg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_fg, mask_gt))
             outlier_this_bg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_bg, mask_gt))
 
-
             # for debug purpose
             print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
             outlier_all += outlier_this_all
@@ -526,3 +525,42 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
     print("Summary:\n"
           "Outlier ratio per image: {}".format(outlier_all / tot))
     return outlier_all / tot
+
+
+def sf_warpper(gt_path, output_path, tau=[3, 0.05]):
+
+    error_sum = 0.0
+    tot = 0
+    for idx in range(200):
+        disp1_gt_filename = "{:06}_10.png".format(idx)
+        disp2_gt_filename = "{:06}_10.png".format(idx)
+        flow_gt_filename = "{:06}_10.png".format(idx)
+
+        D1_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_0", disp1_gt_filename))
+        D2_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_1", disp2_gt_filename))
+        F_gt, mask_F = _get_gt_kitti_flow(os.path.join(gt_path, "flow_occ", flow_gt_filename))
+
+        disp1_est_filename = "{:06}_10.npy".format(idx)
+        disp2_est_filename = "{:06}_11.npy".format(idx)
+        flow_est_filename = "{:06}_10.npy".format(idx)
+
+        D1_est = np.load(os.path.join(output_path, "disparity_0", disp1_est_filename))
+        D2_est = np.load(os.path.join(output_path, "disparity_1", disp2_est_filename))
+        # warp disparity with flow GT
+        u = F_gt[:, :, 0]
+        v = F_gt[:, :, 1]
+        D2_est = warp_flow_fast(D2_est[:, :, np.newaxis], u, v).squeeze()
+        F_est = np.load(os.path.join(output_path, "flow", flow_est_filename))
+
+        mask_d1 = D1_gt > 0
+        mask_d2 = D2_gt > 0
+        mask = np.logical_and(mask_d1, mask_d2, mask_F)
+        err = sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask)
+
+        print("image #{}: {}".format(idx, err))
+
+        error_sum += err
+        tot += 1
+    print("Summary:\n"
+          "Error per image: {}".format(error_sum/tot))
+    return error_sum / tot
