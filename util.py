@@ -361,3 +361,47 @@ def get_gt(category, idx, root_path="./", mode="occ"):
         raise ValueError("Unknown category {}, choose from ['disparity', 'flow;]".format(category))    
     
     return data
+
+
+def get_mask_gt(masks,alpha_p):
+    mask_bg = np.ones_like(masks[0]) == 1
+    for mask in masks:
+        mask_bg[mask] = False
+        mask = mask & alpha_p
+        points = np.argwhere(mask)
+        points[:, [0, 1]] = points[:, [1, 0]]
+
+    mask_bg = mask_bg & alpha_p
+    return mask_bg
+
+def disp_error(D_gt, D_est, tau):
+    E = np.abs(D_gt - D_est)
+    n_err = np.sum(D_gt>0 & E>tau[0] & (E/np.abs(D_gt))>tau[1] )
+    n_total = np.sum(D_gt>0)
+    d_err = n_err / n_total
+    return d_err
+
+def flow_err(F_gt, F_est, flow_mask, tau):
+    E, F_val = flow_error_map(F_gt, F_est, flow_mask)
+
+    F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
+    n_err = np.sum(F_val & E>tau[0] & ((E/F_mag)>tau[1]))
+    n_total = np.sum(F_val)
+
+    f_err = n_err/n_total
+    return f_err 
+
+
+def flow_error_map(F_gt, F_est, flow_mask ):
+    F_gt_du = F_gt[0, :,:]
+    F_gt_dv = F_gt[1, :,:]
+    F_gt_val = flow_mask 
+
+    F_est_du = F_est[0,:,:]
+    F_est_dv = F_est[1,:,:]
+
+    E_du = F_gt_du - F_est_du
+    E_dv = F_gt_dv - F_est_dv 
+    E = np.sqrt(E_du * E_du + E_dv * E_dv)
+    E[flow_mask ==0] = 0
+    return E, F_gt_val
