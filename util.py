@@ -5,6 +5,8 @@ import imageio
 from collections import OrderedDict
 import cv2
 import os
+import scipy
+import scipy.ndimage
 
 def read_calib_file(filepath):
     """Read in a calibration file and parse into a dictionary."""
@@ -321,7 +323,7 @@ def get_gt(category, idx, root_path="./", mode="occ"):
 
     Returns
     -------
-    data - dict<string, numpy.ndarray> or numpy.ndarray
+    data - dict<string, numpy.ndarray>
         if category = "flow", keys = {"flow", "mask"}
         if category = "disparity", keys = {"first", "second"}
     """
@@ -361,3 +363,204 @@ def get_gt(category, idx, root_path="./", mode="occ"):
         raise ValueError("Unknown category {}, choose from ['disparity', 'flow;]".format(category))    
     
     return data
+
+def get_mask_gt(masks,alpha_p):
+    mask_bg = np.ones_like(masks[0]) == 1
+    for mask in masks:
+        mask_bg[mask] = False
+        mask = mask & alpha_p
+        points = np.argwhere(mask)
+        points[:, [0, 1]] = points[:, [1, 0]]
+
+    mask_bg = mask_bg & alpha_p
+    return mask_bg
+
+def disp_error(D_gt, D_est, tau, mask):
+    E = np.abs(D_gt - D_est)
+    n_err = np.sum(mask == 1 & E>tau[0] & (E/np.abs(D_gt))>tau[1] )
+    n_total = np.sum(mask == 1)
+    d_err = n_err / n_total
+    return d_err
+
+def flow_err(F_gt, F_est, flow_mask, tau):
+    E, F_val = flow_error_map(F_gt, F_est, flow_mask)
+
+    F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
+    n_err = np.sum(F_val & E>tau[0] & ((E/F_mag)>tau[1]))
+    n_total = np.sum(F_val)
+
+    f_err = n_err/n_total
+    return f_err 
+
+
+def flow_error_map(F_gt, F_est, flow_mask):
+    F_gt_du = F_gt[0, :,:]
+    F_gt_dv = F_gt[1, :,:]
+    F_gt_val = flow_mask 
+
+    F_est_du = F_est[0,:,:]
+    F_est_dv = F_est[1,:,:]
+
+    E_du = F_gt_du - F_est_du
+    E_dv = F_gt_dv - F_est_dv 
+    E = np.sqrt(E_du * E_du + E_dv * E_dv)
+    E[flow_mask ==0] = 0
+    return E, F_gt_val
+
+def sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask):
+    E_f, F_val_f = flow_error_map(F_gt, F_est, mask)
+    F_mag = np.sqrt(F_gt[0,:,:] * F_gt[0,:,:] + F_gt[1,:,:] * F_gt[1,:,:])
+
+    E_d1 = np.abs(D1_gt - D1_est)
+    E_d2 = np.abs(D2_gt - D2_est)
+
+    err_d1 = (mask == 1 & E_d1>tau[0] & (E_d1/np.abs(D1_gt))>tau[1])
+    err_d2 = (mask == 1 & E_d2>tau[0] & (E_d2/np.abs(D2_gt))>tau[1])
+    err_f = F_val_f & E_f>tau[0] & ((E_f/F_mag)>tau[1])
+
+    n_err = np.sum(err_d1 | err_d2 | err_f)
+    n_total = np.sum(mask == 1)
+
+    f_err = n_err / n_total
+    return f_err
+
+def warp_flow_fast(im2, u, v):
+    """
+    im2 warped according to (u,v).
+    This is a helper function that is used to warp an image to make it match another image
+    (in this case, I2 is warped to I1).
+    Assumes im1[y, x] = im2[y + v[y, x], x + u[y, x]]
+    """
+    # this code is confusing because we assume vx and vy are the negative
+    # of where to send each pixel, as in the results by ce's siftflow code
+    y, x = np.mgrid[:im2.shape[0], :im2.shape[1]]
+    dy = (y + v).flatten()[np.newaxis, :]
+    dx = (x + u).flatten()[np.newaxis, :]
+    # this says: a recipe for making im1 is to make a new image where im[y, x] = im2[y + flow[y, x, 1], x + flow[y, x, 0]]
+    return np.concatenate([scipy.ndimage.map_coordinates(im2[..., i], np.concatenate([dy, dx])).reshape(im2.shape[:2] + (1,)) \
+                           for i in range(im2.shape[2])], axis = 2)
+
+
+def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str, mode: int = 0, tau=[3, 0.05], path_flow=None):
+    # mode: choose from 0 or 1 if category is "disparity"
+    # path_flow: if category = "disparity" and mode=1, path_flow is necessary
+    assert os.path.exists(path_gt)
+    assert os.path.exists(path_output)
+
+    tot = 0
+    outlier_all = 0.
+    outlier_fg = 0.
+    outlier_bg = 0.
+
+    if category is "flow":
+        for idx in range(200):
+            gt_file_name = "{:06}_10.png".format(idx)
+            flow_gt, mask_gt = _get_gt_kitti_flow(os.path.join(path_gt, gt_file_name))
+            output_file_name = "{:06}_10.npy".format(idx)
+            output_flow = np.load(os.path.join(path_output, output_file_name))
+
+            outlier_this_all = flow_err(flow_gt, output_flow, tau, mask_gt)
+
+            # retrieve object mask
+            obj_file_name = "{:06}_10.npy".format(idx)
+            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
+            mask_fg = np.sum(obj_mask, axis=2) > 0
+            mask_bg = np.logical_not(mask_fg)
+
+            outlier_this_fg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_fg, mask_gt))
+            outlier_this_bg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_bg, mask_gt))
+
+            # for debug purpose
+            print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
+            outlier_all += outlier_this_all
+            outlier_bg += outlier_this_bg
+            outlier_fg += outlier_this_fg
+            tot += 1
+    elif category is "disparity":
+        if mode == 1:
+            assert path_flow is not None and os.path.exists(path_flow)
+
+        for idx in range(200):
+            if mode == 0:
+                gt_file_name = "{:06}_10.png".format(idx)
+                output_file_name = "{:06}_10.npy".format(idx)
+                output_disp = np.load(os.path.join(path_output, output_file_name))
+            elif mode == 1:
+                gt_file_name = "{:06}_11.png".format(idx)
+                output_file_name = "{:06}_11.npy".format(idx)
+                output_disp = np.load(os.path.join(path_output, output_file_name))
+                # warp to figure 1
+                # read in flow
+                gt_flow_file_name = "{:06}_10.png".format(idx)
+                flow_gt, _ = _get_gt_kitti_flow(os.path.join(path_flow, gt_flow_file_name))
+                u = flow_gt[:, :, 0]
+                v = flow_gt[:, :, 1]
+                output_disp = warp_flow_fast(output_disp[:, :, np.newaxis], u, v).squeeze()
+            else:
+                raise ValueError("mode not known: {}".format(mode))
+
+            disp_gt = _get_gt_kitti_disparity_single_file(os.path.join(path_gt, gt_file_name))
+            # output_disp = np.load(os.path.join(path_output, output_file_name))
+            mask_gt = (disp_gt > 0).astype(int)
+            outlier_this_all = disp_error(disp_gt, output_disp, mask_gt)
+
+            # retrieve object mask
+            obj_file_name = "{:06}_10.npy".format(idx)
+            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
+            mask_fg = np.sum(obj_mask, axis=2) > 0
+            mask_bg = np.logical_not(mask_fg)
+
+            outlier_this_fg = disp_error(disp_gt, output_disp, tau, np.logical_and(mask_fg, mask_gt))
+            outlier_this_bg = flow_err(disp_gt, output_disp, tau, np.logical_and(mask_bg, mask_gt))
+
+            # for debug purpose
+            print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
+            outlier_all += outlier_this_all
+            outlier_bg += outlier_this_bg
+            outlier_fg += outlier_this_fg
+            tot += 1
+    else:
+        raise ValueError("category not known {}".format(category))
+
+    print("Summary:\n"
+          "Outlier ratio per image: {}".format(outlier_all / tot))
+    return outlier_all / tot
+
+
+def sf_warpper(gt_path, output_path, tau=[3, 0.05]):
+
+    error_sum = 0.0
+    tot = 0
+    for idx in range(200):
+        disp1_gt_filename = "{:06}_10.png".format(idx)
+        disp2_gt_filename = "{:06}_10.png".format(idx)
+        flow_gt_filename = "{:06}_10.png".format(idx)
+
+        D1_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_0", disp1_gt_filename))
+        D2_gt = _get_gt_kitti_disparity_single_file(os.path.join(gt_path, "disp_occ_1", disp2_gt_filename))
+        F_gt, mask_F = _get_gt_kitti_flow(os.path.join(gt_path, "flow_occ", flow_gt_filename))
+
+        disp1_est_filename = "{:06}_10.npy".format(idx)
+        disp2_est_filename = "{:06}_11.npy".format(idx)
+        flow_est_filename = "{:06}_10.npy".format(idx)
+
+        D1_est = np.load(os.path.join(output_path, "disparity_0", disp1_est_filename))
+        D2_est = np.load(os.path.join(output_path, "disparity_1", disp2_est_filename))
+        # warp disparity with flow GT
+        u = F_gt[:, :, 0]
+        v = F_gt[:, :, 1]
+        D2_est = warp_flow_fast(D2_est[:, :, np.newaxis], u, v).squeeze()
+        F_est = np.load(os.path.join(output_path, "flow", flow_est_filename))
+
+        mask_d1 = D1_gt > 0
+        mask_d2 = D2_gt > 0
+        mask = np.logical_and(mask_d1, mask_d2, mask_F)
+        err = sf_error(D1_gt, D1_est, D2_gt, D2_est, F_gt, F_est, tau, mask)
+
+        print("image #{}: {}".format(idx, err))
+
+        error_sum += err
+        tot += 1
+    print("Summary:\n"
+          "Error per image: {}".format(error_sum/tot))
+    return error_sum / tot
