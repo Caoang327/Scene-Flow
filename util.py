@@ -90,7 +90,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     # Compute the camera intrinsics
     data['K_cam0'] = P_rect_00[0:3, 0:3]
     data['K_cam1'] = P_rect_10[0:3, 0:3]
-    data['K_cam2'] = P_rect_20[0:3, 0:3] / 1000
+    data['K_cam2'] = P_rect_20[0:3, 0:3]
     data['K_cam3'] = P_rect_30[0:3, 0:3]
 
     # Compute the stereo baselines in meters by projecting the origin of
@@ -105,7 +105,7 @@ def load_calib_cam_to_cam(velo_to_cam_file, cam_to_cam_file):
     data['b_gray'] = np.linalg.norm(p_velo1 - p_velo0)  # gray baseline
     data['b_rgb'] = np.linalg.norm(p_velo3 - p_velo2)   # rgb baseline
 
-    data['f'] = data['P_rect_30'][0,0] / 1000
+    data['f'] = data['P_rect_30'][0,0]
 
     pik00 = P_rect_00.dot(R_rect_00.dot(data['T_cam0_velo']))
     pik10 = P_rect_10.dot(R_rect_10.dot(data['T_cam1_velo']))
