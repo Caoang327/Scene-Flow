@@ -4,8 +4,10 @@ import pickle
 import util
 import PIL
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import copy
 from scipy.optimize import least_squares
+import scipy.optimize
 
 res_outlier_d2 = []
 res_outlier_f = []
@@ -22,7 +24,7 @@ res_outlier_d2_bg = []
 res_outlier_f_bg = []
 res_outlier_sf_bg = []
 
-for i in range(200)[0:1]:
+for i in range(200):
     # Initialize file path
     calib_path1 = 'data_scene_flow_calib/training/calib_velo_to_cam/' + str(i).zfill(6) + '.txt'
     calib_path2 = 'data_scene_flow_calib/training/calib_cam_to_cam/' + str(i).zfill(6) + '.txt'
@@ -62,7 +64,6 @@ for i in range(200)[0:1]:
 
     # Initialization
     alpha_p = (np.ones_like(disparity1).astype(int) == 1)
-    motion_0 = np.ones(6)
     best_motions = []
 
     # Initialize variable to save results
@@ -195,47 +196,61 @@ for i in range(200)[0:1]:
     res_outlier_sf_bg.append(outlier_sf_bg)
 
     # Figures
-    plt.cm.bwr.set_bad('k', 1.0)
+    cols = np.array([[0 / 3.0, 0.1875 / 3.0, 49, 54, 149],
+                     [0.1875 / 3.0, 0.375 / 3.0, 69, 117, 180],
+                     [0.375 / 3.0, 0.75 / 3.0, 116, 173, 209],
+                     [0.75 / 3.0, 1.5 / 3.0, 171, 217, 233],
+                     [1.5 / 3.0, 3 / 3.0, 224, 243, 248],
+                     [3 / 3.0, 6 / 3.0, 254, 224, 144],
+                     [6 / 3.0, 12 / 3.0, 253, 174, 97],
+                     [12 / 3.0, 24 / 3.0, 244, 109, 67],
+                     [24 / 3.0, 48 / 3.0, 215, 48, 39],
+                     [48 / 3.0, float('inf'), 165, 0, 38]])
+
+    val_range = np.array([0, 0.19, 0.38, 0.75, 1.5, 3.0, 6.0, 12.0, 24.0, 48.0, 96.0])
+    color = cols[:, 2:] / 255
+
+    cmap = mpl.colors.ListedColormap(color)
+    norm = mpl.colors.BoundaryNorm(val_range, cmap.N)
+
+    cmap.set_bad('k', 1.0)
 
     # Errors of motion
-    plt.figure(1)
-    result = np.sqrt(np.sum((motion_map-motion_map_gt)**2, axis=2) / np.sum(motion_map_gt**2, axis=2))
-    result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
-    plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
-    plt.title('Normalized root square errors of motion')
-    plt.savefig('results/' + str(i).zfill(6) + '_err_m_norm.png')
-    plt.clf()
+    # plt.figure(1)
+    # result = np.sqrt(np.sum((motion_map-motion_map_gt)**2, axis=2) / np.sum(motion_map_gt**2, axis=2))
+    # result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
+    # plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
+    # plt.axis('off')
+    # plt.title('Normalized root square errors of motion')
+    # plt.savefig('results/' + str(i).zfill(6) + '_err_m_norm.png')
+    # plt.clf()
 
     plt.figure(2)
     result = np.sqrt(np.sum((motion_map-motion_map_gt)**2, axis=2))
     result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title('Root square errors of motion')
     plt.savefig('results/' + str(i).zfill(6) + '_err_m.png')
     plt.clf()
 
     # Errors of points
-    plt.figure(3)
-    result = np.sqrt(np.sum((point_map-point_map_gt)**2, axis=2) / np.sum(point_map_gt**2, axis=2))
-    result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
-    plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
-    plt.title('Normalized root square errors of 3D coordinates')
-    plt.savefig('results/' + str(i).zfill(6) + '_err_p_norm.png')
-    plt.clf()
+    # plt.figure(3)
+    # result = np.sqrt(np.sum((point_map-point_map_gt)**2, axis=2) / np.sum(point_map_gt**2, axis=2))
+    # result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
+    # plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
+    # plt.axis('off')
+    # plt.colorbar(orientation='horizontal', pad=0.05)
+    # plt.title('Normalized root square errors of 3D coordinates')
+    # plt.savefig('results/' + str(i).zfill(6) + '_err_p_norm.png')
+    # plt.clf()
 
     plt.figure(4)
     result = np.sqrt(np.sum((point_map-point_map_gt)**2, axis=2))
     result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
     plt.title('Root square errors of 3D coordinates')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.savefig('results/' + str(i).zfill(6) + '_err_p.png')
     plt.clf()
 
@@ -258,9 +273,8 @@ for i in range(200)[0:1]:
 
     plt.figure(7)
     result = np.ma.masked_where((alpha_p & mask_valid)==False, err_flow)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title(' Flow errors After (DRISF)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_f_after.png')
     plt.clf()
@@ -268,9 +282,8 @@ for i in range(200)[0:1]:
     plt.figure(8)
     flow_error = np.sqrt(np.sum((flow_ini - flow_gt)**2, axis=0))
     result = np.ma.masked_where((alpha_p & mask_valid)==False, flow_error)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title('Flow errors before (PWC)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_f_before.png')
     plt.clf()
@@ -285,67 +298,62 @@ for i in range(200)[0:1]:
 
     plt.figure(10)
     result = np.ma.masked_where((alpha_p & mask_valid)==False, err_d2)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title(' D2 errors after (DRISF)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_d_after.png')
     plt.clf()
 
     plt.figure(11)
     result = np.ma.masked_where((alpha_p & mask_valid) == False, err_d2_before)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title(' D2 errors before (LS)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_d_before.png')
     plt.clf()
 
     plt.figure(12)
-    result = np.sqrt(np.sum((motion_map_before - motion_map_gt) ** 2, axis=2) / np.sum(motion_map_gt ** 2, axis=2))
-    result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
-    plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
-    plt.title('Normalized root square errors of motion (LS)')
-    plt.savefig('results/' + str(i).zfill(6) + '_err_m_before_norm.png')
-    plt.clf()
+    # result = np.sqrt(np.sum((motion_map_before - motion_map_gt) ** 2, axis=2) / np.sum(motion_map_gt ** 2, axis=2))
+    # result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
+    # plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
+    # plt.axis('off')
+    # plt.colorbar(orientation='horizontal', pad=0.05)
+    # plt.title('Normalized root square errors of motion (LS)')
+    # plt.savefig('results/' + str(i).zfill(6) + '_err_m_before_norm.png')
+    # plt.clf()
 
     plt.figure(13)
     result = np.sqrt(np.sum((motion_map_before - motion_map_gt) ** 2, axis=2))
     result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title('Root square errors of motion (LS)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_m_before.png')
     plt.clf()
 
     plt.figure(14)
-    result = np.sqrt(np.sum((point_map_before - point_map_gt) ** 2, axis=2) / np.sum(point_map_gt ** 2, axis=2))
-    result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
-    plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
-    plt.title('Normalized root square errors of 3D coordinates (LS)')
-    plt.savefig('results/' + str(i).zfill(6) + '_err_p_before_norm.png')
-    plt.clf()
+    # result = np.sqrt(np.sum((point_map_before - point_map_gt) ** 2, axis=2) / np.sum(point_map_gt ** 2, axis=2))
+    # result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
+    # plt.imshow(result, cmap='bwr', vmin=0, vmax=1)
+    # plt.axis('off')
+    # plt.colorbar(orientation='horizontal', pad=0.05)
+    # plt.title('Normalized root square errors of 3D coordinates (LS)')
+    # plt.savefig('results/' + str(i).zfill(6) + '_err_p_before_norm.png')
+    # plt.clf()
 
     plt.figure(15)
     result = np.sqrt(np.sum((point_map_before - point_map_gt) ** 2, axis=2))
     result = np.ma.masked_where((alpha_p & alpha_p_gt) == False, result)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
     plt.title('Root square errors of 3D coordinates (LS)')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.savefig('results/' + str(i).zfill(6) + '_err_p_before.png')
     plt.clf()
 
     plt.figure(16)
     result = np.ma.masked_where((alpha_p & mask_valid) == False, err_flow_before)
-    plt.imshow(result, cmap='bwr', vmin=0, vmax=50)
+    plt.imshow(result, cmap=cmap, norm=norm)
     plt.axis('off')
-    plt.colorbar(orientation='horizontal', pad=0.05)
     plt.title(' Flow errors before (LS)')
     plt.savefig('results/' + str(i).zfill(6) + '_err_f_ls.png')
     plt.clf()
