@@ -90,7 +90,10 @@ for i in range(200):
         motion_map_before[p[:, 1], p[:, 0], :] = motion
         motion_before = motion
 
-        trans_matrix, motion = solver.gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f)
+        if t != (len(point_set) - 1):
+            trans_matrix, motion = solver.gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f)
+        else:
+            trans_matrix, motion = solver.gaussian_newton(p_inlier, disparity1, disparity2, flow, alpha_p, L0, L1, motion, pi_k, T, f, is_bg=True)
         best_motions.append(motion)
 
         # Record motion

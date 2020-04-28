@@ -563,7 +563,7 @@ def get_groundtruth(masks, flow, disparity1, disparity2, L0, L1, alpha_p, pi_k, 
         if t != (len(p_set) - 1):
             trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, pi_k, T, f, is_gt=True)
         else:
-            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, pi_k, T, f, is_gt=True, is_bg=False)
+            trans_matrix, motion_gt = gaussian_newton(p, disparity1, disparity2, flow, alpha_p, L0, L1, motion_gt, pi_k, T, f, is_gt=True, is_bg=True)
         motions.append(motion_gt)
 
         motion_map[p[:, 1], p[:, 0], :] = motion_gt
