@@ -76,6 +76,7 @@ def inverse_project(p, pi_k, d, T, f):
     Outputs:
     - p_3d: 3d point in the world coordinate, tensor of shape (3, N)
     """
+    d = np.clip(d, 1e-4, None)
     depth = f * T / d  # of shape (N, 1)
     N = p.shape[0]
     p_3d = np.linalg.inv(pi_k).dot(np.concatenate((p.T, np.ones((1, N))), axis=0)) * depth.reshape(1, N)
@@ -136,7 +137,7 @@ def bilinear_interpolate_numpy(im, q, alpha_p=None, p=None, flag=True, if_biline
         result = Ia * wa.reshape(-1, 1) + Ib * wb.reshape(-1, 1) + Ic * wc.reshape(-1, 1) + Id * wd.reshape(-1, 1)
     # print(p[result==0])
     if flag:
-        alpha_p[p[result == 0, 1], p[result == 0, 0]] = 0
+        alpha_p[p[result == 0, 1], p[result == 0, 0]] = False
         result[result == 0] = 1
 
     return result
@@ -183,7 +184,7 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, 
     return E
 
 
-# def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, if_bilinear=True, is_gt=False):
+# def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, if_bilinear=True, is_gt=False):
 #     """
 #     Calculate the E_rigid
 #
@@ -205,8 +206,6 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, 
 #     # alpha = 0.5
 #     epsilon = 1e-5
 #     N = p.shape[0]
-#     data = util.load_calib_cam_to_cam("velo_to_cam000010.txt", "./cam_to_cam000010.txt")
-#     pi_k, T, f = data['K_cam2'], data['b_rgb'], data['f']
 #     p_3d = inverse_project(p, pi_k, disparity1[p[:, 1], p[:, 0]], T, f)  # of shape (3, N)
 #     flow_q = flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
 #     q = p + flow_q.T
@@ -221,15 +220,16 @@ def cost_function(motion, p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, 
 #     p_homo = pi_k.dot(p3d_t2)
 #     p_t2 = p_homo[:2, :] / p_homo[2:3, :]
 #     r_flow = p_t2 - p.T - flow[:, p[:, 1], p[:, 0]]  # of shape (2, N)
-#     r_photo = bilinear_interpolate_numpy(L1, p_t2.T, flag=False) - L0[p[:, 1], p[:, 0], :]  # of shape (N, 3)
-#     r_photo = r_photo.T
+#     # r_photo = bilinear_interpolate_numpy(L1, p_t2.T, flag=False) - L0[p[:, 1], p[:, 0], :]  # of shape (N, 3)
+#     # r_photo = r_photo.T
 #     E_rigid = (np.sum(r_rigid ** 2, axis=0) + epsilon ** 2) ** alpha
 #     E_flow = (np.sum(r_flow ** 2, axis=0) + epsilon ** 2) ** alpha
-#     E_photo = (np.sum(r_photo ** 2, axis=0) + epsilon ** 2) ** alpha
+#     # E_photo = (np.sum(r_photo ** 2, axis=0) + epsilon ** 2) ** alpha
 #
 #     # print(np.sum(np.abs(residual), axis=0))
 #     # print(residual)
-#     E = (E_rigid + E_flow + E_photo) * alpha_p[p[:, 1], p[:, 0]]
+#     # E = (E_rigid + E_flow + E_photo) * alpha_p[p[:, 1], p[:, 0]]
+#     E = E_flow * alpha_p[p[:, 1], p[:, 0]]
 #
 #     return E
 
@@ -252,14 +252,14 @@ def ransac(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f):
     - best_motion: the optimal motion, array of shape (6,)
     """
     num_iters = 5
-    epsilon = 5
+    epsilon = 4
     N = p.shape[0]
     num_inliers = 0
     idxset_best = []
     motion_0 = np.ones(6)
     for i in range(num_iters):
         idx = np.random.choice(N, N//15, replace=False)
-        res = least_squares(cost_function, motion_0, args=(p[idx, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
+        res = least_squares(cost_function, motion_0, method='lm', max_nfev=2500, args=(p[idx, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
         motion = res.x
 
         # calculate residual
@@ -274,10 +274,12 @@ def ransac(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f):
         if num_inliers < np.sum(residual < epsilon):
             idxset_best = np.argwhere(residual < epsilon)[:, 0]
             num_inliers = np.sum(residual < epsilon)
-    best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
+    # best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
+    best_res = least_squares(cost_function, motion_0, method='lm', max_nfev=2500, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
     best_motion = best_res.x
+    print(best_res.status)
 
-    return best_motion, p
+    return best_motion, p[idxset_best, :]
 
 
 def jacobian_rigidfit(p_3d, q_3d):
@@ -486,7 +488,7 @@ def gaussian_newton(p,  disparity1, disparity2, flow, alpha_p, L0, L1, motion_0,
             JWJ3, JWr3 = jacobian_flow(p_3d_t2, p, fx, fy, pi_k, flow)
 
             dmotion = -np.linalg.inv(np.sum(JWJ1+JWJ2+JWJ3, axis=0)).dot(np.sum(JWr1+JWr2+JWr3, axis=0))  # of shape (6, 1)
-            # dmotion = -np.linalg.inv(np.sum(JWJ2, axis=0)).dot(np.sum(JWr2, axis=0))  # of shape (6, 1)
+            # dmotion = -np.linalg.inv(np.sum(JWJ3, axis=0)).dot(np.sum(JWr3, axis=0))  # of shape (6, 1)
             # print(dmotion)
         else:
             JWJ1, JWr1 = jacobian_photometric(p_3d_t2, p, L0, L1, fx, fy, pi_k)
@@ -548,7 +550,7 @@ def get_groundtruth(masks, flow, disparity1, disparity2, L0, L1, alpha_p, pi_k, 
     motion_map = np.ones((disparity1.shape[0], disparity1.shape[1], 6))
     point_map = np.ones((disparity1.shape[0], disparity1.shape[1], 3))
     for t, p in enumerate(p_set):
-        res = least_squares(cost_function, motion_0, args=(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, False, True))
+        res = least_squares(cost_function, motion_0, method='lm', max_nfev=2500, args=(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f, False, True))
         motion_gt = res.x
         if np.sum(alpha_p[p[:, 1], p[:, 0]]) == 0:
             continue
