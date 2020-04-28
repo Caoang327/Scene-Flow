@@ -277,7 +277,7 @@ def ransac(p, disparity1, disparity2, flow, alpha_p, pi_k, T, f):
     # best_res = least_squares(cost_function, motion_0, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
     best_res = least_squares(cost_function, motion_0, method='lm', max_nfev=2500, args=(p[idxset_best, :], disparity1, disparity2, flow, alpha_p, pi_k, T, f))
     best_motion = best_res.x
-    print(best_res.status)
+    # print(best_res.status)
 
     return best_motion, p[idxset_best, :]
 
