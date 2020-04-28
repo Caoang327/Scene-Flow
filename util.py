@@ -463,16 +463,17 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
             flow_gt = flow_gt.transpose(2, 0, 1)
             output_flow = output_flow.transpose(2, 0, 1)
 
-            outlier_this_all = flow_err(flow_gt, output_flow, tau, mask_gt)
+            outlier_this_all = flow_err(flow_gt, output_flow, mask_gt, tau)
 
             # retrieve object mask
-            obj_file_name = "{:06}_10.npy".format(idx)
-            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
-            mask_fg = np.sum(obj_mask, axis=2) > 0
+            obj_file_name = "{:06}_10.png".format(idx)
+            obj_mask_all = get_gt_kitti(os.path.join(path_seg, obj_file_name))
+            obj_mask = obj_mask_all["masks"]
+            mask_fg = np.sum(obj_mask, axis=0) > 0
             mask_bg = np.logical_not(mask_fg)
 
-            outlier_this_fg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_fg, mask_gt))
-            outlier_this_bg = flow_err(flow_gt, output_flow, tau, np.logical_and(mask_bg, mask_gt))
+            outlier_this_fg = flow_err(flow_gt, output_flow, np.logical_and(mask_fg, mask_gt), tau)
+            outlier_this_bg = flow_err(flow_gt, output_flow, np.logical_and(mask_bg, mask_gt), tau)
 
             # for debug purpose
             print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
@@ -490,7 +491,7 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
                 output_file_name = "{:06}_10.npy".format(idx)
                 output_disp = np.load(os.path.join(path_output, output_file_name))
             elif mode == 1:
-                gt_file_name = "{:06}_11.png".format(idx)
+                gt_file_name = "{:06}_10.png".format(idx)
                 output_file_name = "{:06}_11.npy".format(idx)
                 output_disp = np.load(os.path.join(path_output, output_file_name))
                 # warp to figure 1
@@ -506,16 +507,17 @@ def outlier_warpper(category: str, path_gt: str, path_output: str, path_seg: str
             disp_gt = _get_gt_kitti_disparity_single_file(os.path.join(path_gt, gt_file_name))
             # output_disp = np.load(os.path.join(path_output, output_file_name))
             mask_gt = (disp_gt > 0).astype(int)
-            outlier_this_all = disp_error(disp_gt, output_disp, mask_gt)
+            outlier_this_all = disp_error(disp_gt, output_disp, tau, mask_gt)
 
             # retrieve object mask
-            obj_file_name = "{:06}_10.npy".format(idx)
-            obj_mask = get_gt_kitti(os.path.join(path_seg, "image_2", obj_file_name))
-            mask_fg = np.sum(obj_mask, axis=2) > 0
+            obj_file_name = "{:06}_10.png".format(idx)
+            obj_mask_all = get_gt_kitti(os.path.join(path_seg, obj_file_name))
+            obj_mask = obj_mask_all["masks"]
+            mask_fg = np.sum(obj_mask, axis=0) > 0
             mask_bg = np.logical_not(mask_fg)
 
             outlier_this_fg = disp_error(disp_gt, output_disp, tau, np.logical_and(mask_fg, mask_gt))
-            outlier_this_bg = flow_err(disp_gt, output_disp, tau, np.logical_and(mask_bg, mask_gt))
+            outlier_this_bg = disp_error(disp_gt, output_disp, tau, np.logical_and(mask_bg, mask_gt))
 
             # for debug purpose
             print("Image #{}: all: {}, fg: {}, bg: {}".format(idx, outlier_this_all, outlier_this_fg, outlier_this_bg))
